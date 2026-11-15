@@ -1,0 +1,63 @@
+name: llm-chess-arena
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: development
+    init: true
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATA_DIR: /data/experiments
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CHOKIDAR_USEPOLLING: ${WATCH_USE_POLLING:-true}
+      CHOKIDAR_INTERVAL: ${WATCH_INTERVAL_MS:-500}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+      - /app/dist
+      - experiments:/data/experiments
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => {if (!r.ok) process.exit(1)}).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    stop_grace_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    init: true
+    environment:
+      API_PROXY_TARGET: http://backend:3000
+      WATCH_USE_POLLING: ${WATCH_USE_POLLING:-true}
+      WATCH_INTERVAL_MS: ${WATCH_INTERVAL_MS:-500}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/dist
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r => {if (!r.ok) process.exit(1)}).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    stop_grace_period: 15s
+
+volumes:
+  experiments:

@@ -1,0 +1,14 @@
+# Только браузерные проверки; основной запуск использует два сервиса.
+services:
+  e2e:
+    build:
+      context: ./frontend
+      target: browser-tests
+    init: true
+    shm_size: 256mb
+    environment:
+      E2E_BASE_URL: http://frontend:5173
+    depends_on:
+      frontend:
+        condition: service_healthy
+    command: ["npm", "run", "test:e2e"]
