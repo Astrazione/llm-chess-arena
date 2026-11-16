@@ -1,14 +1,33 @@
 # Только браузерные проверки; основной запуск использует два сервиса.
 services:
+  mock-api:
+    build:
+      context: ./backend
+      target: development
+    init: true
+    volumes:
+      - ./backend/scripts/mock-chat-api.mjs:/app/scripts/mock-chat-api.mjs:ro
+    command: ["node", "scripts/mock-chat-api.mjs"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r => {if (!r.ok) process.exit(1)}).catch(() => process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
   e2e:
     build:
       context: ./frontend
       target: browser-tests
     init: true
     shm_size: 256mb
+    volumes:
+      - ./artifacts/e2e:/artifacts/e2e
+      - ./frontend/e2e:/app/e2e:ro
+      - ./frontend/playwright.config.ts:/app/playwright.config.ts:ro
     environment:
       E2E_BASE_URL: http://frontend:5173
     depends_on:
+      mock-api:
+        condition: service_healthy
       frontend:
         condition: service_healthy
     command: ["npm", "run", "test:e2e"]

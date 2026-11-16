@@ -17,6 +17,8 @@
     "check": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
+    "@sinclair/typebox": "0.34.52",
+    "chess.js": "1.4.0",
     "fastify": "5.12.8"
   },
   "devDependencies": {

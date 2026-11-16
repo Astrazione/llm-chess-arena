@@ -16,7 +16,7 @@ async function shutdown(signal: string): Promise<void> {
   deadline.unref();
 
   try {
-    // Future orchestrator/provider cleanup belongs in Fastify onClose hooks.
+    // Fastify preClose cancels matches before pending HTTP handlers are drained.
     await app.close();
     app.log.info('Shutdown complete');
   } catch (error) {
