@@ -7,6 +7,11 @@ export function normalizeBaseUrl(value: string): string {
   }
   return url.href.replace(/\/+$/, '');
 }
+// A server root uses the standard API prefix; explicit API prefixes stay intact.
+export function completionBaseUrl(value: string): string {
+  const base = normalizeBaseUrl(value);
+  return new URL(base).pathname === '/' ? `${base}/v1` : base;
+}
 
 export class ProviderCredentials {
   readonly #profiles = new Map<string, { baseUrl: string; key: string }>();

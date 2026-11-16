@@ -9,10 +9,17 @@ export interface MockSettings {
 export interface CompatibleSettings {
   provider: 'openai-compatible'; providerName: string; baseUrl: string; modelId: string;
   credentialProfile?: string; temperature?: number; maxOutputTokens?: number;
+  discoveryApi?: DiscoveryApi;
   seed?: number; runtime?: string; runtimeVersion?: string; modelRevision?: string; quantization?: string; maxContextTokens?: number;
   tokenLimitParameter: 'max_tokens' | 'max_completion_tokens'; responseFormat: 'text' | 'json_object';
   timeoutMs: number; systemPrompt?: string;
 }
+export type DiscoveryApi = 'ollama' | 'vllm' | 'openai-compatible';
+export interface DiscoveredModel {
+  id: string; displayName: string; provider: DiscoveryApi; status: 'available' | 'loaded' | 'cached';
+  parameterSize?: string; quantization?: string; sizeBytes?: number;
+}
+export interface ModelList { schemaVersion: 1; models: DiscoveredModel[]; warnings: string[] }
 export type PlayerSettings = MockSettings | CompatibleSettings;
 export interface RequestMetrics {
   responseTimeMs: number | null; inputTokens: number | null; outputTokens: number | null; totalTokens: number | null;

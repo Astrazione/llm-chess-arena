@@ -4,6 +4,12 @@ import { Chess } from 'chess.js';
 
 const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/health') { response.end('ok'); return; }
+  if (request.method === 'GET' && request.url === '/empty/v1/models') { response.end('{"data":[]}'); return; }
+  if (request.method === 'GET' && request.url === '/broken/v1/models') { response.end('{"data":[{}]}'); return; }
+  if (request.method === 'GET' && request.url === '/white/api/tags') {
+    response.end(JSON.stringify({ models: [{ model: 'legal', size: 1234567890, details: { parameter_size: '7B', quantization_level: 'Q4_K_M' } }, { model: 'downloaded' }] })); return;
+  }
+  if (request.method === 'GET' && request.url === '/white/api/ps') { response.end('{"models":[{"model":"legal"}]}'); return; }
   if (request.method === 'GET' && /^\/(white|black)\/v1\/models$/.test(request.url ?? '')) {
     response.setHeader('Content-Type', 'application/json');
     response.end(JSON.stringify({ data: [{ id: 'legal', max_model_len: 4096 }] })); return;

@@ -1,4 +1,4 @@
-import type { Command, Experiment, ExperimentSummary, GameEvent, MatchConfig, MatchSnapshot, PlayerSettings, ProbeResult, ProviderInfo } from './contracts';
+import type { Command, CompatibleSettings, DiscoveryApi, Experiment, ExperimentSummary, GameEvent, MatchConfig, MatchSnapshot, ModelList, PlayerSettings, ProbeResult, ProviderInfo } from './contracts';
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -19,6 +19,9 @@ export const listExperiments = (offset: number, signal: AbortSignal) => request<
 export const getExperiment = (id: string, signal: AbortSignal) => request<Experiment>(`/${id}`, { signal }, '/api/experiments');
 export const commandMatch = (id: string, command: Command, timeoutMs = 65000) => request<MatchSnapshot>(`/${id}/${command}`, { method: 'POST', signal: AbortSignal.timeout(timeoutMs) });
 export const getProviderInfo = (signal: AbortSignal) => request<ProviderInfo>('', { signal }, '/api/providers');
+export const discoverModels = (connection: Pick<CompatibleSettings, 'baseUrl' | 'credentialProfile'> & { discoveryApi: DiscoveryApi }, signal: AbortSignal) => request<ModelList>('/models', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(connection), signal,
+}, '/api/providers');
 export const probeProvider = (settings: PlayerSettings, signal: AbortSignal) => request<ProbeResult>('/probe', {
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings), signal,
 }, '/api/providers');

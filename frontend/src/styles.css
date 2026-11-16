@@ -5,6 +5,8 @@ button, input, select, textarea { font: inherit; }
 button { border: 1px solid #35443d; border-radius: 7px; background: #222e28; color: #d8e2dc; padding: 10px 14px; cursor: pointer; font-size: .85rem; font-weight: 600; transition: background .15s; }
 button:hover:enabled { background: #34483c; }
 button:disabled { opacity: .32; cursor: default; }
+.model-picker input[type="checkbox"] { width: auto; margin-right: 8px; }
+.model-picker .hint, .model-picker .error-text { overflow-wrap: anywhere; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid #a6d5ad; outline-offset: 3px; }
 button.primary { background: #b3d69f; color: #172718; border-color: #b3d69f; }
 button.primary:hover:enabled { background: #c6e6b6; }

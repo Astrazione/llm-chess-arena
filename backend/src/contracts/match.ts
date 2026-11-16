@@ -61,11 +61,30 @@ export const MockSettingsSchema = Type.Object({
   timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 30000 })),
 }, objectOptions);
 export type MockSettings = Static<typeof MockSettingsSchema>;
+export const DiscoveryApiSchema = enumeration(['ollama', 'vllm', 'openai-compatible']);
+export const ModelConnectionSchema = Type.Object({
+  baseUrl: Type.String({ minLength: 1, maxLength: 2048 }),
+  discoveryApi: DiscoveryApiSchema,
+  credentialProfile: Type.Optional(Type.String({ pattern: '^[a-zA-Z0-9_-]{1,64}$' })),
+}, objectOptions);
+export type ModelConnection = Static<typeof ModelConnectionSchema>;
+export const DiscoveredModelSchema = Type.Object({
+  id: Type.String(), displayName: Type.String(), provider: DiscoveryApiSchema,
+  status: enumeration(['available', 'loaded', 'cached']),
+  parameterSize: Type.Optional(Type.String()), quantization: Type.Optional(Type.String()),
+  sizeBytes: Type.Optional(Type.Integer({ minimum: 0 })),
+}, objectOptions);
+export type DiscoveredModel = Static<typeof DiscoveredModelSchema>;
+export const ModelListSchema = Type.Object({
+  schemaVersion: Type.Literal(1), models: Type.Array(DiscoveredModelSchema), warnings: Type.Array(Type.String()),
+}, objectOptions);
+export type ModelList = Static<typeof ModelListSchema>;
 export const CompatibleSettingsSchema = Type.Object({
   provider: Type.Literal('openai-compatible'),
   providerName: Type.String({ minLength: 1, maxLength: 128 }),
   baseUrl: Type.String({ minLength: 1, maxLength: 2048 }),
   modelId: Type.String({ minLength: 1, maxLength: 256 }),
+  discoveryApi: Type.Optional(DiscoveryApiSchema),
   credentialProfile: Type.Optional(Type.String({ pattern: '^[a-zA-Z0-9_-]{1,64}$' })),
   temperature: Type.Optional(Type.Number({ minimum: 0, maximum: 2 })),
   seed: Type.Optional(Type.Integer({ minimum: 0, maximum: 4294967295 })),

@@ -15,6 +15,21 @@ class TestEventSource {
 }
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); TestEventSource.instances = []; });
 describe('SSE recovery', () => {
+  it('recreates a permanently closed EventSource after proxy failure without retrying a move', async () => {
+    vi.stubGlobal('EventSource', TestEventSource);
+    const fetchMock = vi.fn((url: string) => Promise.resolve(new Response(JSON.stringify(url.includes('/events') ? { events: [], hasMore: false } : snapshot))));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(useMatch);
+    await waitFor(() => expect(TestEventSource.instances).toHaveLength(1));
+    const original = TestEventSource.instances[0]!;
+    Object.assign(original, { readyState: 2 });
+    act(() => original.onerror?.());
+    await waitFor(() => expect(TestEventSource.instances).toHaveLength(2), { timeout: 2500 });
+    act(() => TestEventSource.instances[1]!.onopen?.());
+    await waitFor(() => expect(result.current.connection).toBe('SSE подключён'));
+    expect(original.close).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls.every(([url]) => !url.includes('/next-move'))).toBe(true);
+  });
   it('diagnoses a lost RAM match even when a reconnect returns 404 before onopen', async () => {
     vi.stubGlobal('EventSource', TestEventSource);
     let lost = false;

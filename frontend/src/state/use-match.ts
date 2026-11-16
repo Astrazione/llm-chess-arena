@@ -44,6 +44,7 @@ export function useMatch() {
     let cursor = 0;
     let recovering = false;
     let streamOpen = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     async function recover() {
       if (recovering) return;
       recovering = true;
@@ -76,6 +77,14 @@ export function useMatch() {
           // A restarted RAM backend returns 404 before SSE can open. Diagnose
           // that through REST as well; onopen alone would never run.
           if (navigator.onLine) void recover();
+          // A proxy may return a non-SSE error while backend restarts. CLOSED
+          // EventSources do not retry; keep native retry for CONNECTING sources.
+          if (source.readyState === 2) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(() => {
+              if (active && navigator.onLine) { source.close(); stream = connect(); }
+            }, 1000);
+          }
         }
       };
       source.addEventListener('snapshot', message => {
@@ -88,12 +97,12 @@ export function useMatch() {
       return source;
     }
     let stream = connect();
-    const offline = () => { streamOpen = false; stream.close(); setConnection('Восстановление соединения'); };
-    const online = () => { stream.close(); stream = connect(); };
+    const offline = () => { clearTimeout(reconnectTimer); streamOpen = false; stream.close(); setConnection('Восстановление соединения'); };
+    const online = () => { clearTimeout(reconnectTimer); stream.close(); stream = connect(); };
     window.addEventListener('offline', offline);
     window.addEventListener('online', online);
     return () => {
-      active = false; controller.abort(); stream.close();
+      active = false; clearTimeout(reconnectTimer); controller.abort(); stream.close();
       window.removeEventListener('offline', offline);
       window.removeEventListener('online', online);
     };

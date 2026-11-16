@@ -86,6 +86,10 @@ Store удаляет значения известных ключей и Bearer-
 
 ## Docker и текущий HTTP-контракт
 
+Обнаружение моделей — отдельный порт `ModelDiscovery` и адаптер `HttpModelDiscovery`; оркестратор и шахматный движок не меняются. POST `/api/providers/models` принимает подключение без Model ID. Контракты и versioned ответ ModelList определены в `contracts/match.ts`. Ollama читает tags и отдельно ps; vLLM и совместимые API перечисляют обслуживаемые ID через models. Список не заменяет completion preflight.
+
+Адреса ограничены точным server allowlist (стандартные шаблоны, профили и `LLM_DISCOVERY_URLS_JSON`), ключи разрешаются ProviderCredentials для исходного URL. Запрещены redirects, URL credentials/query/fragment и cross-origin браузерные вызовы. Четыре одновременных запроса, deadline 5 с, ограничение тела/числа записей; preClose и disconnect отменяют запросы. Vite сохраняет Host для проверки Origin. UI дебаунсит подключение, отменяет прежние запросы и не меняет выбранный ID при обновлении/ошибке. `discoveryApi` — необязательное расширение конфигурации; отсутствие поля использует OpenAI-compatible список. HF Cache читается отдельно штатным CLI в inference-контейнере, backend не получает filesystem/Docker permissions.
+
 - Node.js 24 LTS, Debian slim, TypeScript strict, ESM. Отдельные package-lock.json, установка `npm ci` в build stage. Приложения работают от пользователя node, Compose init пересылает сигналы и собирает дочерние процессы.
 - Bind mounts исходников; отдельные анонимные volumes для node_modules/dist. Dependencies устанавливаются при сборке; обновление lockfile требует пересборки и `--renew-anon-volumes`.
 - Vite слушает 0.0.0.0:5173, Fastify — 0.0.0.0:3000. На хост порты публикуются только через 127.0.0.1. Браузер не использует Docker DNS и не получает переменные backend.

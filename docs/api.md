@@ -29,6 +29,16 @@ Start/Resume возвращают принятый снимок после за�
 
 Pause не отменяет текущий запрос. Если ответ легален, он применяется; если отклонён, новый retry не начинается до Resume/NextMove. Уже использованный бюджет попыток и описание ошибки сохраняются. При busy=true команды NextMove и Resume из Paused возвращают 409 OperationInProgress. Stop/Reset работают и во время preflight/ожидания ответа, применяют AbortSignal и инвалидируют старую операцию. Поздний ответ не меняет ни доску, ни события новой/остановленной игры.
 
+## Обнаружение моделей
+
+`POST /api/providers/models` принимает `{ "baseUrl": "http://vllm:8000/v1", "discoveryApi": "vllm" }` и необязательный `credentialProfile`. `discoveryApi`: `ollama`, `vllm`, `openai-compatible`. Model ID и параметры генерации не требуются; произвольные поля, включая ключи, отклоняются.
+
+Ответ: `{ "schemaVersion": 1, "models": [{ "id": "exact-id", "displayName": "exact-id", "provider": "vllm", "status": "available" }], "warnings": [] }`. Необязательные характеристики: `parameterSize`, `quantization`, `sizeBytes`. Статусы: `available` — перечислена сервером без сведений о памяти; `loaded` — подтверждена /api/ps; `cached` — скачана в Ollama и отсутствует в успешном /api/ps. Пустой массив — успешный ответ. Ответ имеет `Cache-Control: no-store`.
+
+Ошибки используют обычный `{error:{code,message}}`: 400 — схема/подключение, 403 — адрес вне server allowlist или чужой Origin, 429 — четыре активных запроса, 502 — сеть/API/некорректный ответ, 503 — отмена/shutdown, 504 — тайм-аут. Сырые upstream errors и ключи не публикуются. Стандартные адреса и профили разрешены; дополнительные Base URL задаются в `LLM_DISCOVERY_URLS_JSON`. Тело запроса до 4096 bytes, upstream до 1 MiB/2000 записей, общий deadline 5 с. Disconnect/preClose отменяют запросы. Completion preflight остаётся обязательным перед матчем; перечисление не проверяет параметры генерации.
+
+`discoveryApi` также допускается как необязательное поле существующего Chat Completions игрока. Оно сохраняется в snapshots/архиве/экспорте, не меняет протокол генерации и не требуется старым экспериментам.
+
 ## Конфигурация
 
 Пример гарантированного мата двумя Mock Providers:

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { Color, MatchConfig, PlayerSettings, ProviderInfo, ProbeResult, Strategy } from '../api/contracts';
 import { getProviderInfo, probeProvider } from '../api/matches';
 import { connectionPresets } from '../api/connection-presets';
+import { ModelPicker } from './ModelPicker';
 
 const strategies: Record<Strategy, string> = {
   RandomLegalMove: 'Случайный легальный ход', ScriptedMoves: 'Сценарий UCI', InvalidMove: 'Недопустимые ходы',
@@ -73,21 +74,21 @@ export function Settings({ config, disabled, onSave, initialStep }: {
               <h3>{color === 'white' ? 'Белые' : 'Чёрные'}</h3>
               <label>Провайдер · {side}<select aria-label={`Провайдер · ${side}`} value={settings.provider ?? 'mock'} onChange={e => replacePlayer(color, e.target.value === 'mock'
                 ? { provider: 'mock', strategy: 'RandomLegalMove', seed: 1, ...(settings.systemPrompt ? { systemPrompt: settings.systemPrompt } : {}) }
-                : { provider: 'openai-compatible', providerName: 'OpenAI-compatible', baseUrl: 'http://host.docker.internal:11434/v1', modelId: '', timeoutMs: 60000, tokenLimitParameter: 'max_tokens', responseFormat: 'text', ...(settings.systemPrompt ? { systemPrompt: settings.systemPrompt } : {}) })}>
+                : { provider: 'openai-compatible', providerName: 'OpenAI-compatible', discoveryApi: 'ollama', baseUrl: 'http://host.docker.internal:11434/v1', modelId: '', timeoutMs: 60000, tokenLimitParameter: 'max_tokens', responseFormat: 'text', ...(settings.systemPrompt ? { systemPrompt: settings.systemPrompt } : {}) })}>
                 <option value="mock">Mock Provider</option><option value="openai-compatible">OpenAI-compatible API</option>
               </select></label>
               {settings.provider === 'openai-compatible' ? <>
                 <label>Подключение · {side}<select aria-label={`Подключение · ${side}`} value="" onChange={e => {
                   const preset = connectionPresets[e.target.value as keyof typeof connectionPresets];
                   if (!preset) return;
-                  const next = { ...settings, providerName: preset.name, baseUrl: preset.baseUrl };
+                  const next = { ...settings, providerName: preset.name, baseUrl: preset.baseUrl, discoveryApi: preset.discoveryApi };
                   delete next.credentialProfile;
                   replacePlayer(color, next);
                 }}><option value="">Выбрать шаблон адреса…</option>{Object.entries(connectionPresets).map(([id, preset]) => <option key={id} value={id}>{preset.name}</option>)}</select></label>
-                <p className="hint">Model ID укажите по данным вашего сервера. Base URL можно изменить для любого подключения.</p>
+                <p className="hint">Выберите модель из списка или включите ручной ввод. Base URL можно изменить для любого подключения.</p>
                 <label>Название провайдера · {side}<input required maxLength={128} value={settings.providerName} onChange={e => player(color, { providerName: e.target.value })} /></label>
                 <label>Base URL · {side}<input required type="url" value={settings.baseUrl} onChange={e => player(color, { baseUrl: e.target.value })} /></label>
-                <label>Модель · {side}<input required maxLength={256} placeholder="model-id" value={settings.modelId} onChange={e => player(color, { modelId: e.target.value })} /></label>
+                <ModelPicker settings={settings} side={side} disabled={disabled} onChange={patch => player(color, patch)} />
                 <label>Профиль ключа · {side}<select aria-label={`Профиль ключа · ${side}`} value={settings.credentialProfile ?? ''} onChange={e => {
                   const profile = info?.profiles.find(item => item.id === e.target.value);
                   if (profile) player(color, { credentialProfile: profile.id, baseUrl: profile.baseUrl });

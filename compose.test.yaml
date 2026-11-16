@@ -1,5 +1,8 @@
 # Только браузерные проверки; основной запуск использует два сервиса.
 services:
+  backend:
+    environment:
+      LLM_DISCOVERY_URLS_JSON: '["http://mock-api:8080/white/v1","http://mock-api:8080/black/v1","http://mock-api:8080/empty/v1","http://mock-api:8080/broken/v1","http://mock-api:8081/v1"]'
   mock-api:
     build:
       context: ./backend

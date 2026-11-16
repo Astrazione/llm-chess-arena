@@ -8,6 +8,7 @@ test.beforeEach(async ({ page }) => {
 async function endpoint(page: Page, side: 'белые' | 'чёрные', model = 'legal') {
   await page.getByLabel(`Провайдер · ${side}`, { exact: true }).selectOption('openai-compatible');
   await page.getByLabel(`Base URL · ${side}`, { exact: true }).fill(`http://mock-api:8080/${side === 'белые' ? 'white' : 'black'}/v1`);
+  await page.getByLabel(`Ручной ввод Model ID · ${side}`, { exact: true }).check();
   await page.getByLabel(`Модель · ${side}`, { exact: true }).fill(model);
 }
 async function apply(page: Page) {

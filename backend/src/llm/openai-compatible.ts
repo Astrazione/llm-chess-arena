@@ -1,5 +1,5 @@
 import type { CompletionRequest, ProviderDiagnostics } from '../contracts/match.js';
-import { ProviderCredentials, normalizeBaseUrl } from './credentials.js';
+import { ProviderCredentials, completionBaseUrl } from './credentials.js';
 import { withDeadline } from './deadline.js';
 import { connectionCheckRequest, ProviderRequestError, requestMetrics, type CompletionResponse, type LlmProvider, type ModelAvailability, type ModelConfiguration } from './provider.js';
 const record = (value: unknown): Record<string, unknown> =>
@@ -8,7 +8,7 @@ const tokens = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 
-async function readBody(response: Response, signal: AbortSignal, maxBytes = MAX_RESPONSE_BYTES): Promise<string> {
+export async function readBody(response: Response, signal: AbortSignal, maxBytes = MAX_RESPONSE_BYTES): Promise<string> {
   if (Number(response.headers.get('content-length')) > maxBytes) {
     await response.body?.cancel();
     throw new Error('Response size limit');
@@ -53,7 +53,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     try {
       return await withDeadline(signal, Math.min(config.timeoutMs, 2000), async active => {
         const key = this.credentials.resolve(config.baseUrl, config.credentialProfile);
-        const response = await fetch(`${normalizeBaseUrl(config.baseUrl)}/models`, {
+        const response = await fetch(`${completionBaseUrl(config.baseUrl)}/models`, {
           signal: active, redirect: 'error', headers: key ? { Authorization: `Bearer ${key}` } : {},
         });
         if (!response.ok) { await response.body?.cancel(); return { modelMetadata: 'unavailable' }; }
@@ -78,7 +78,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
     let url: string;
     let key: string | undefined;
     try {
-      url = `${normalizeBaseUrl(config.baseUrl)}/chat/completions`;
+      url = `${completionBaseUrl(config.baseUrl)}/chat/completions`;
       key = this.credentials.resolve(config.baseUrl, config.credentialProfile);
     } catch { throw fail('Invalid Base URL or server credential profile'); }
     const body: Record<string, unknown> = {

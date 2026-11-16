@@ -16,7 +16,8 @@ export default defineConfig({
       // Applies to REST and future SSE routes, without rewriting /api.
       '/api': {
         target: process.env.API_PROXY_TARGET ?? 'http://backend:3000',
-        changeOrigin: true,
+        // Preserve the browser Host for backend same-origin checks.
+        changeOrigin: false,
         timeout: 0,
         proxyTimeout: 0,
       },
