@@ -70,6 +70,37 @@ test('connection errors are shown and Mock can play against a compatible endpoin
   await expect(page.getByTestId('ply-count')).toHaveText('2');
 });
 
+test('runtime templates keep model IDs editable and show reported context and OOM through the proxy', async ({ page }) => {
+  await endpoint(page, 'белые');
+  const presets = page.getByLabel('Подключение · белые', { exact: true });
+  const baseUrl = page.getByLabel('Base URL · белые', { exact: true });
+  for (const [id, address] of [
+    ['nvidia', 'http://vllm:8000/v1'], ['metal', 'http://host.docker.internal:8000/v1'],
+    ['dmr', 'http://model-runner.docker.internal/engines/v1'], ['ollama', 'http://host.docker.internal:11434/v1'],
+    ['external', ''], ['cloud', ''],
+  ] as const) {
+    await presets.selectOption(id);
+    await expect(baseUrl).toHaveValue(address);
+    await expect(page.getByLabel('Модель · белые', { exact: true })).toHaveValue('legal');
+  }
+  await baseUrl.fill('http://mock-api:8080/white/v1');
+  await button(page, 'Проверить модель · белые').click();
+  const diagnostics = page.getByLabel('Диагностика · белые', { exact: true });
+  await expect(diagnostics).toContainText('Контекст сервера: 4096');
+  await expect(diagnostics).toContainText('Модель в ответе: legal');
+  await page.getByLabel('Модель · белые', { exact: true }).fill('oom');
+  await button(page, 'Проверить модель · белые').click();
+  await expect(diagnostics).toContainText('Runtime сообщил о нехватке памяти');
+  await expect(page.locator('body')).not.toContainText('PRIVATE runtime data');
+  await page.getByLabel('Модель · белые', { exact: true }).fill('legal');
+  await apply(page);
+  await button(page, 'Next Move').click();
+  await expect(page.getByTestId('ply-count')).toHaveText('1');
+  const id = await page.evaluate(() => sessionStorage.getItem('arena-match'));
+  const snapshot = await (await page.request.get(`/api/matches/${id}`)).json();
+  expect(snapshot.providerChecks[0].result.diagnostics.reportedMaxContextTokens).toBe(4096);
+});
+
 test('Reset cancels a compatible HTTP request and discards its late reply', async ({ page }) => {
   await endpoint(page, 'белые', 'delay');
   await apply(page);

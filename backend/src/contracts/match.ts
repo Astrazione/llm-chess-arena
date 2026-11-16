@@ -68,6 +68,12 @@ export const CompatibleSettingsSchema = Type.Object({
   modelId: Type.String({ minLength: 1, maxLength: 256 }),
   credentialProfile: Type.Optional(Type.String({ pattern: '^[a-zA-Z0-9_-]{1,64}$' })),
   temperature: Type.Optional(Type.Number({ minimum: 0, maximum: 2 })),
+  seed: Type.Optional(Type.Integer({ minimum: 0, maximum: 4294967295 })),
+  runtime: Type.Optional(Type.String({ maxLength: 128 })),
+  runtimeVersion: Type.Optional(Type.String({ maxLength: 128 })),
+  modelRevision: Type.Optional(Type.String({ maxLength: 256 })),
+  quantization: Type.Optional(Type.String({ maxLength: 128 })),
+  maxContextTokens: Type.Optional(Type.Integer({ minimum: 1 })),
   maxOutputTokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 131072 })),
   tokenLimitParameter: enumeration(['max_tokens', 'max_completion_tokens']),
   responseFormat: enumeration(['text', 'json_object']),
@@ -98,13 +104,16 @@ export type RequestMetrics = Static<typeof RequestMetricsSchema>;
 export const ProbeResultSchema = Type.Object({
   available: Type.Boolean(), diagnostic: Type.String(),
   error: Type.Union([MoveErrorSchema, Type.Null()]), metrics: RequestMetricsSchema,
+  diagnostics: Type.Optional(diagnosticSchema),
 }, objectOptions);
 export type ProbeResult = Static<typeof ProbeResultSchema>;
 export const ProviderInfoSchema = Type.Object({
   defaultSystemPrompt: Type.String(),
   profiles: Type.Array(Type.Object({ id: Type.String(), baseUrl: Type.String() }, objectOptions)),
 }, objectOptions);
-export const ProviderCheckSchema = Type.Object({ color: ColorSchema, checkedAt: Type.String(), result: ProbeResultSchema }, objectOptions);
+export const ProviderCheckSchema = Type.Object({ color: ColorSchema, checkedAt: Type.String(), result: ProbeResultSchema,
+  request: Type.Optional(CompletionRequestSchema), rawText: Type.Optional(Type.String()),
+}, objectOptions);
 export const AttemptSchema = Type.Object({
   id: Type.Integer(), gameId: Type.String(), color: ColorSchema, modelId: Type.String(), ply: Type.Integer(),
   attemptNumber: Type.Integer(), status: enumeration(['Pending', 'Accepted', 'Rejected', 'Cancelled']),
@@ -117,7 +126,7 @@ export const AttemptSchema = Type.Object({
 export type Attempt = Static<typeof AttemptSchema>;
 export const EventSchema = Type.Object({
   schemaVersion: Type.Literal(1), matchId: Type.String(), gameId: Type.String(), sequence: Type.Integer(),
-  at: Type.String(), type: enumeration(['GameCreated', 'GameStarted', 'MoveRequested', 'MoveAccepted', 'MoveRejected', 'ProviderFailed', 'AttemptCancelled', 'GamePaused', 'GameResumed', 'GameCompleted', 'GameStopped', 'GameReset', 'OperationSettled']),
+  at: Type.String(), type: enumeration(['GameCreated', 'GameStarted', 'MoveRequested', 'MoveAccepted', 'MoveRejected', 'ProviderFailed', 'AttemptCancelled', 'GamePaused', 'GameResumed', 'GameCompleted', 'GameStopped', 'GameReset', 'OperationSettled', 'ProviderCheckRequested', 'ProviderChecked']),
   status: StatusSchema, ply: Type.Integer(), fen: Type.String(),
   data: Type.Object({
     attempt: Type.Optional(AttemptSchema), move: Type.Optional(MoveSchema), result: Type.Optional(ResultSchema),
@@ -125,12 +134,28 @@ export const EventSchema = Type.Object({
   }, objectOptions),
 }, { ...objectOptions, $id: 'GameEvent' });
 export type GameEvent = Static<typeof EventSchema>;
+export const PlayerStatisticsSchema = Type.Object({
+  successfulMoves: Type.Integer(), illegalMoves: Type.Integer(), formatErrors: Type.Integer(), errors: Type.Integer(),
+  retries: Type.Integer(), requests: Type.Integer(), completedAttempts: Type.Integer(),
+  legalMoveRatio: nullableNumber, meanResponseMs: nullableNumber, medianResponseMs: nullableNumber,
+  inputTokens: nullableNumber, outputTokens: nullableNumber,
+  inputTokenSamples: Type.Integer(), outputTokenSamples: Type.Integer(), responseSamples: Type.Integer(),
+}, objectOptions);
+export const StatisticsSchema = Type.Object({
+  players: Type.Object({ white: PlayerStatisticsSchema, black: PlayerStatisticsSchema }, objectOptions),
+  plies: Type.Integer(), durationMs: nullableNumber, moveRequests: Type.Integer(), preflightRequests: Type.Integer(),
+  totalRequests: Type.Integer(), resultCategory: enumeration(['Ongoing', 'ChessWin', 'Draw', 'TechnicalLoss', 'Stopped', 'Limit']),
+}, objectOptions);
+export type ExperimentStatistics = Static<typeof StatisticsSchema>;
 export const SnapshotSchema = Type.Object({
   schemaVersion: Type.Literal(1), id: Type.String(), gameId: Type.String(), generation: Type.Integer(),
   status: StatusSchema, busy: Type.Boolean(), config: MatchConfigSchema,
   position: PositionSchema, attempts: Type.Array(AttemptSchema),
   providerChecks: Type.Array(ProviderCheckSchema),
   result: Type.Union([ResultSchema, Type.Null()]), pgn: Type.String(), lastEventSequence: Type.Integer(),
+  statistics: Type.Optional(StatisticsSchema),
+  storageError: Type.Optional(Type.String()),
+  archived: Type.Optional(Type.Boolean()),
 }, { ...objectOptions, $id: 'MatchSnapshot' });
 export type MatchSnapshot = Static<typeof SnapshotSchema>;
 export const StreamUpdateSchema = Type.Object({
@@ -139,3 +164,20 @@ export const StreamUpdateSchema = Type.Object({
 export type StreamUpdate = Static<typeof StreamUpdateSchema>;
 export const ApiErrorSchema = Type.Object({ error: Type.Object({ code: Type.String(), message: Type.String() }, objectOptions) }, objectOptions);
 export type ApiErrorResponse = Static<typeof ApiErrorSchema>;
+
+export const ExperimentSchema = Type.Object({
+  schema: Type.Literal('llm-chess-arena/experiment'), schemaVersion: Type.Literal(1),
+  id: Type.String({ pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' }),
+  matchId: Type.String({ pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' }),
+  createdAt: Type.String(), updatedAt: Type.String(), recoveredAt: Type.Optional(Type.String()),
+  snapshot: Type.Ref(SnapshotSchema), events: Type.Array(Type.Ref(EventSchema)), statistics: StatisticsSchema,
+}, objectOptions);
+export type Experiment = Static<typeof ExperimentSchema> & { snapshot: MatchSnapshot; events: GameEvent[] };
+export const ExperimentSummarySchema = Type.Object({
+  id: Type.String(), matchId: Type.String(), createdAt: Type.String(), updatedAt: Type.String(),
+  status: StatusSchema, players: Type.Object({ white: Type.String(), black: Type.String() }, objectOptions),
+  result: Type.Union([ResultSchema, Type.Null()]), statistics: StatisticsSchema,
+}, objectOptions);
+export const ExperimentListSchema = Type.Object({
+  experiments: Type.Array(ExperimentSummarySchema), unreadableFiles: Type.Integer(), total: Type.Integer(),
+}, objectOptions);

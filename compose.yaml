@@ -1,5 +1,8 @@
 name: llm-chess-arena
 
+include:
+  - compose.inference.yaml
+
 services:
   backend:
     build:

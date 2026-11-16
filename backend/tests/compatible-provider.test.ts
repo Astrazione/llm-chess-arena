@@ -14,9 +14,14 @@ import { ChessEngine } from '../src/domain/chess/engine.js';
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 type Body = { model: string; messages: { role: string; content: string }[]; [key: string]: unknown };
-async function api(handler: (body: Body, response: ServerResponse, request: IncomingMessage) => void) {
+async function api(handler: (body: Body, response: ServerResponse, request: IncomingMessage) => void, metadata?: (response: ServerResponse, request: IncomingMessage) => void) {
   const requests: Body[] = [];
   const server = createServer(async (request, response) => {
+    if (request.method === 'GET') {
+      if (metadata) metadata(response, request);
+      else { response.writeHead(404); response.end(); }
+      return;
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(chunk as Buffer);
     const body = JSON.parse(Buffer.concat(chunks).toString()) as Body;
@@ -43,6 +48,38 @@ const signal = () => new AbortController().signal;
 const adapter = () => new OpenAiCompatibleProvider(new ProviderCredentials({}));
 
 describe('OpenAI-compatible HTTP adapter', () => {
+  it('reports model/context from the endpoint and keeps optional discovery failures nonfatal', async () => {
+    const endpoint = await api((_body, response) => {
+      response.end(JSON.stringify({ model: 'served-alias', choices: [{ message: { content: '{"move":"e2e4"}' } }] }));
+    }, (response, req) => {
+      expect(req.url).toBe('/v1/models');
+      response.end(JSON.stringify({ data: [{ id: 'model-a', max_model_len: 4096, secret: 'DO NOT EXPOSE', vram: 42 }] }));
+    });
+    const result = await adapter().probe(configuration(endpoint.baseUrl), signal());
+    expect(result.diagnostics).toMatchObject({ reportedModel: 'served-alias', listedModel: 'model-a', reportedMaxContextTokens: 4096, endpointState: 'responding' });
+    expect(JSON.stringify(result)).not.toMatch(/DO NOT EXPOSE|vram/);
+    const missing = await api((_body, response) => send(response));
+    expect(await adapter().probe(configuration(missing.baseUrl), signal())).toMatchObject({ available: true, diagnostics: { modelMetadata: 'unavailable' } });
+    const invalid = await api((_body, response) => send(response), response => response.end('{invalid'));
+    expect(await adapter().probe(configuration(invalid.baseUrl), signal())).toMatchObject({ available: true, diagnostics: { modelMetadata: 'unavailable' } });
+  });
+
+  it('classifies reported OOM without disclosing its body and retains diagnostics through preflight', async () => {
+    const endpoint = await api((_body, response) => {
+      response.writeHead(500);
+      response.end(JSON.stringify({ error: { message: 'CUDA out of memory: SECRET provider config' } }));
+    });
+    const service = new MatchService(new ProviderCredentials({}));
+    const result = await service.probe(settings(endpoint.baseUrl), signal());
+    expect(result).toMatchObject({ available: false, diagnostics: { resourceError: 'OutOfMemory', httpStatus: 500 }, error: { code: 'ProviderError' } });
+    expect(JSON.stringify(result)).not.toContain('SECRET');
+    const match = service.create({ players: { white: settings(endpoint.baseUrl), black: { strategy: 'RandomLegalMove' } } });
+    await match.nextMove();
+    expect(match.snapshot().position.history).toHaveLength(0);
+    expect(match.snapshot().providerChecks[0]?.result.diagnostics?.resourceError).toBe('OutOfMemory');
+    await service.close();
+  });
+
   it('sends only public messages and selected fields, parses usage without inventing generation metrics', async () => {
     const endpoint = await api((_body, response, req) => {
       expect(req.url).toBe('/v1/chat/completions');

@@ -125,8 +125,10 @@ export function useMatch() {
       const snapshot = await createMatch(config);
       sessionStorage.setItem('arena-match', snapshot.id);
       apply(snapshot);
+      return true;
     } catch (err) { setError(err instanceof Error ? err.message : 'Ошибка конфигурации'); }
     finally { setPending(null); }
+    return false;
   }
   return { ...view, connection, error, pending, run, configure, reconnect: () => setRetry(value => value + 1) };
 }

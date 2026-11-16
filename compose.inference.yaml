@@ -1,0 +1,46 @@
+# Независимый inference runtime. Основное приложение не зависит от его health.
+services:
+  vllm:
+    profiles: [nvidia]
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.32.0}
+    init: true
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /root/.cache/huggingface
+    command:
+      - ${VLLM_MODEL_ID:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - --revision
+      - ${VLLM_MODEL_REVISION:-main}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --max-model-len
+      - ${VLLM_MAX_MODEL_LEN:-4096}
+      - --gpu-memory-utilization
+      - ${VLLM_GPU_MEMORY_UTILIZATION:-0.80}
+      - --max-num-seqs
+      - ${VLLM_MAX_NUM_SEQS:-1}
+      - --enforce-eager
+    ports:
+      - "127.0.0.1:${VLLM_PORT:-8000}:8000"
+    volumes:
+      - huggingface:/root/.cache/huggingface
+    shm_size: 2gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15m
+      retries: 5
+    stop_grace_period: 60s
+
+volumes:
+  huggingface:

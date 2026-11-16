@@ -38,7 +38,8 @@ export function registerMatchRoutes(app: FastifyInstance, service: MatchService)
   app.get<{ Params: MatchParams }>('/api/matches/:matchId/stream', {
     schema: { params: ParamsSchema, response: commonResponses },
   }, async (request, reply) => {
-    const match = service.get(request.params.matchId);
+    const initial = await service.snapshot(request.params.matchId);
+    const match = service.findLive(request.params.matchId);
     reply.hijack();
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
@@ -63,21 +64,22 @@ export function registerMatchRoutes(app: FastifyInstance, service: MatchService)
       if (reply.raw.writableLength > 8 * 1024 * 1024) { close(); return; }
       reply.raw.write(frame);
     };
-    const unsubscribe = match.events.subscribe(event => {
+    const unsubscribe = match?.events.subscribe(event => {
       const update: StreamUpdate = { schemaVersion: 1, event, snapshot: match.snapshot() };
       send(`id: ${event.sequence}\nevent: match\ndata: ${JSON.stringify(update)}\n\n`);
-    });
+    }) ?? (() => {});
     const heartbeat = setInterval(() => { send(': heartbeat\n\n'); }, 15000);
     heartbeat.unref();
     streams.add(close);
     reply.raw.on('close', close);
-    send(`retry: 1000\nevent: snapshot\ndata: ${JSON.stringify(match.snapshot())}\n\n`);
+    send(`retry: 1000\nevent: snapshot\ndata: ${JSON.stringify(initial)}\n\n`);
   });
 
   app.post<{ Body: CreateMatchRequest; Reply: MatchSnapshot }>('/api/matches', {
     schema: { body: CreateMatchSchema, response: { 201: Type.Ref(SnapshotSchema), ...commonResponses } },
   }, async (request, reply) => {
     const match = service.create(request.body);
+    await match.persisted();
     reply.code(201).header('Location', `/api/matches/${match.id}`);
     return match.snapshot();
   });
@@ -86,7 +88,7 @@ export function registerMatchRoutes(app: FastifyInstance, service: MatchService)
     schema: { params: ParamsSchema, response: { 200: Type.Ref(SnapshotSchema), ...commonResponses } },
   }, async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
-    return service.get(request.params.matchId).snapshot();
+    return service.snapshot(request.params.matchId);
   });
 
   const commands = ['start', 'pause', 'resume', 'next-move', 'stop', 'reset'] as const;
@@ -102,6 +104,7 @@ export function registerMatchRoutes(app: FastifyInstance, service: MatchService)
     }, async (request, reply) => {
       const match = service.get(request.params.matchId);
       const result = command === 'next-move' ? await match.nextMove() : match[command]();
+      await match.persisted();
       reply.code(statusCode);
       return result;
     });
@@ -109,7 +112,12 @@ export function registerMatchRoutes(app: FastifyInstance, service: MatchService)
 
   app.post<{ Params: MatchParams; Body: Static<typeof ClaimSchema>; Reply: MatchSnapshot }>('/api/matches/:matchId/claim-draw', {
     schema: { params: ParamsSchema, body: ClaimSchema, response: { 200: Type.Ref(SnapshotSchema), ...commonResponses } },
-  }, async request => service.get(request.params.matchId).claimDraw(request.body.reason));
+  }, async request => {
+    const match = service.get(request.params.matchId);
+    const result = match.claimDraw(request.body.reason);
+    await match.persisted();
+    return result;
+  });
 
   app.get<{ Params: MatchParams; Querystring: Static<typeof QuerySchema> }>('/api/matches/:matchId/events', {
     schema: {
@@ -126,8 +134,7 @@ export function registerMatchRoutes(app: FastifyInstance, service: MatchService)
     const after = Number(request.query.after ?? 0);
     const limit = Number(request.query.limit ?? 100);
     if (limit < 1 || limit > 500) throw new MatchCommandError('InvalidRequest', 'limit must be between 1 and 500', 400);
-    const match = service.get(request.params.matchId);
     reply.header('Cache-Control', 'no-store');
-    return { schemaVersion: 1, matchId: match.id, ...match.events.read(after, limit) };
+    return { schemaVersion: 1, matchId: request.params.matchId, ...await service.journal(request.params.matchId, after, limit) };
   });
 }

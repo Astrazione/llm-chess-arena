@@ -1,4 +1,4 @@
-import type { Command, GameEvent, MatchConfig, MatchSnapshot, PlayerSettings, ProbeResult, ProviderInfo } from './contracts';
+import type { Command, Experiment, ExperimentSummary, GameEvent, MatchConfig, MatchSnapshot, PlayerSettings, ProbeResult, ProviderInfo } from './contracts';
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
@@ -15,6 +15,8 @@ export const createMatch = (config: Partial<MatchConfig>, signal?: AbortSignal) 
   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config), ...(signal ? { signal } : {}),
 });
 export const getMatch = (id: string, signal?: AbortSignal) => request<MatchSnapshot>(`/${id}`, signal ? { signal } : {});
+export const listExperiments = (offset: number, signal: AbortSignal) => request<{ experiments: ExperimentSummary[]; total: number; unreadableFiles: number }>(`?offset=${offset}&limit=25`, { signal }, '/api/experiments');
+export const getExperiment = (id: string, signal: AbortSignal) => request<Experiment>(`/${id}`, { signal }, '/api/experiments');
 export const commandMatch = (id: string, command: Command, timeoutMs = 65000) => request<MatchSnapshot>(`/${id}/${command}`, { method: 'POST', signal: AbortSignal.timeout(timeoutMs) });
 export const getProviderInfo = (signal: AbortSignal) => request<ProviderInfo>('', { signal }, '/api/providers');
 export const probeProvider = (settings: PlayerSettings, signal: AbortSignal) => request<ProbeResult>('/probe', {

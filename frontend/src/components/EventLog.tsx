@@ -6,6 +6,7 @@ const labels: Record<GameEvent['type'], string> = {
   MoveRejected: 'Ответ отклонён', ProviderFailed: 'Ошибка провайдера', AttemptCancelled: 'Запрос отменён',
   GamePaused: 'Пауза', GameResumed: 'Игра возобновлена', GameCompleted: 'Партия завершена', GameStopped: 'Матч остановлен',
   GameReset: 'Новая партия после Reset', OperationSettled: 'Запрос завершён',
+  ProviderCheckRequested: 'Проверка модели', ProviderChecked: 'Модель проверена',
 };
 export function EventLog({ events }: { events: GameEvent[] }) {
   const scroll = useRef<HTMLDivElement>(null);
@@ -28,6 +29,7 @@ export function EventLog({ events }: { events: GameEvent[] }) {
             {attempt && <p>{attempt.modelId} · полуход {attempt.ply} · попытка {attempt.attemptNumber}{attempt.elapsedMs !== null ? ` · ${Math.round(attempt.elapsedMs)} мс` : ''}</p>}
             {attempt?.metrics && attempt.status !== 'Pending' && <p>Токены: вход {attempt.metrics.inputTokens ?? '—'} / выход {attempt.metrics.outputTokens ?? '—'} / всего {attempt.metrics.totalTokens ?? '—'} · генерация {attempt.metrics.generationTimeMs === null ? '—' : `${Math.round(attempt.metrics.generationTimeMs)} мс`}{attempt.status === 'Accepted' && attempt.attemptNumber > 1 ? ' · исправлено моделью после повтора' : ''}</p>}
             {attempt?.error && <><p className="error-text">{attempt.error.code}: {attempt.error.message}</p><details open><summary>Ответ модели</summary><pre>{attempt.rawText ?? 'Ответ отсутствует'}</pre>{attempt.diagnostics && <pre>{JSON.stringify(attempt.diagnostics, null, 2)}</pre>}</details></>}
+            {attempt && <details><summary>Запрос и ответ · попытка {attempt.id}</summary><pre>{JSON.stringify(attempt.request, null, 2)}</pre><pre>{attempt.rawText ?? 'Ответ отсутствует'}</pre></details>}
             {!attempt && event.data.message && <p>{event.data.message}</p>}
             {event.data.result && <p>{event.data.result.kind} · {event.data.result.reason} · {event.data.result.score}</p>}
           </div>

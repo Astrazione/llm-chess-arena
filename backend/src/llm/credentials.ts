@@ -41,6 +41,6 @@ export class ProviderCredentials {
   }
   redact(text: string): string {
     for (const { key } of this.#profiles.values()) text = text.split(key).join('[REDACTED]');
-    return text;
+    return text.replace(/Bearer\s+[a-zA-Z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]');
   }
 }

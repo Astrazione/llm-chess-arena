@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { Color, MatchConfig, PlayerSettings, ProviderInfo, Strategy } from '../api/contracts';
+import type { Color, MatchConfig, PlayerSettings, ProviderInfo, ProbeResult, Strategy } from '../api/contracts';
 import { getProviderInfo, probeProvider } from '../api/matches';
+import { connectionPresets } from '../api/connection-presets';
 
 const strategies: Record<Strategy, string> = {
   RandomLegalMove: 'Случайный легальный ход', ScriptedMoves: 'Сценарий UCI', InvalidMove: 'Недопустимые ходы',
@@ -14,6 +15,7 @@ export function Settings({ config, disabled, onSave, initialStep }: {
   const [info, setInfo] = useState<ProviderInfo | null>(null);
   const [infoError, setInfoError] = useState('');
   const [checks, setChecks] = useState<Partial<Record<Color, string>>>({});
+  const [diagnostics, setDiagnostics] = useState<Partial<Record<Color, ProbeResult>>>({});
   const [checking, setChecking] = useState<Partial<Record<Color, boolean>>>({});
   const probes = useRef<Partial<Record<Color, AbortController>>>({});
   useEffect(() => {
@@ -27,6 +29,7 @@ export function Settings({ config, disabled, onSave, initialStep }: {
     delete probes.current[color];
     setChecking(current => ({ ...current, [color]: false }));
     setChecks(current => ({ ...current, [color]: '' }));
+    setDiagnostics(current => ({ ...current, [color]: undefined }));
     setDraft(current => ({ ...current, players: { ...current.players, [color]: settings } }));
   }
   function player(color: Color, patch: Partial<PlayerSettings>) {
@@ -38,10 +41,14 @@ export function Settings({ config, disabled, onSave, initialStep }: {
     probes.current[color] = controller;
     setChecking(current => ({ ...current, [color]: true }));
     setChecks(current => ({ ...current, [color]: 'Проверяем модель…' }));
+    setDiagnostics(current => ({ ...current, [color]: undefined }));
     const timer = setTimeout(() => controller.abort(), (draft.players[color].timeoutMs ?? 1000) + 5000);
     try {
       const result = await probeProvider(draft.players[color], controller.signal);
-      if (!controller.signal.aborted) setChecks(current => ({ ...current, [color]: result.available ? `Модель доступна. ${result.diagnostic}` : `Ошибка: ${result.diagnostic}` }));
+      if (!controller.signal.aborted) {
+        setChecks(current => ({ ...current, [color]: result.available ? `Модель доступна. ${result.diagnostic}` : `Ошибка: ${result.diagnostic}` }));
+        setDiagnostics(current => ({ ...current, [color]: result }));
+      }
     } catch (error) {
       if (!controller.signal.aborted) setChecks(current => ({ ...current, [color]: error instanceof Error ? error.message : 'Ошибка подключения' }));
     } finally {
@@ -70,6 +77,14 @@ export function Settings({ config, disabled, onSave, initialStep }: {
                 <option value="mock">Mock Provider</option><option value="openai-compatible">OpenAI-compatible API</option>
               </select></label>
               {settings.provider === 'openai-compatible' ? <>
+                <label>Подключение · {side}<select aria-label={`Подключение · ${side}`} value="" onChange={e => {
+                  const preset = connectionPresets[e.target.value as keyof typeof connectionPresets];
+                  if (!preset) return;
+                  const next = { ...settings, providerName: preset.name, baseUrl: preset.baseUrl };
+                  delete next.credentialProfile;
+                  replacePlayer(color, next);
+                }}><option value="">Выбрать шаблон адреса…</option>{Object.entries(connectionPresets).map(([id, preset]) => <option key={id} value={id}>{preset.name}</option>)}</select></label>
+                <p className="hint">Model ID укажите по данным вашего сервера. Base URL можно изменить для любого подключения.</p>
                 <label>Название провайдера · {side}<input required maxLength={128} value={settings.providerName} onChange={e => player(color, { providerName: e.target.value })} /></label>
                 <label>Base URL · {side}<input required type="url" value={settings.baseUrl} onChange={e => player(color, { baseUrl: e.target.value })} /></label>
                 <label>Модель · {side}<input required maxLength={256} placeholder="model-id" value={settings.modelId} onChange={e => player(color, { modelId: e.target.value })} /></label>
@@ -88,6 +103,18 @@ export function Settings({ config, disabled, onSave, initialStep }: {
                 }} /></label>
                 <label>Параметр лимита · {side}<select aria-label={`Параметр лимита · ${side}`} value={settings.tokenLimitParameter} onChange={e => player(color, { tokenLimitParameter: e.target.value as 'max_tokens' | 'max_completion_tokens' })}><option value="max_tokens">max_tokens</option><option value="max_completion_tokens">max_completion_tokens</option></select></label>
                 <label>Формат API · {side}<select aria-label={`Формат API · ${side}`} value={settings.responseFormat} onChange={e => player(color, { responseFormat: e.target.value as 'text' | 'json_object' })}><option value="text">Текст → JSON Parser</option><option value="json_object">JSON mode</option></select></label>
+                <details className="advanced"><summary>Воспроизводимость · {side}</summary>
+                  <label>Seed API · {side}<input type="number" min="0" max="4294967295" placeholder="Не отправлять" value={settings.seed ?? ''} onChange={e => {
+                    const next = { ...settings }; if (e.target.value === '') delete next.seed; else next.seed = Number(e.target.value); replacePlayer(color, next);
+                  }} /></label>
+                  {(['runtime', 'runtimeVersion', 'modelRevision', 'quantization'] as const).map((key, index) => <label key={key}>{['Inference runtime', 'Версия runtime', 'Ревизия модели', 'Квантование'][index]} · {side}<input maxLength={key === 'modelRevision' ? 256 : 128} value={settings[key] ?? ''} onChange={e => {
+                    const next = { ...settings }; if (e.target.value) next[key] = e.target.value; else delete next[key]; replacePlayer(color, next);
+                  }} /></label>)}
+                  <label>Контекст модели · {side}<input type="number" min="1" value={settings.maxContextTokens ?? ''} onChange={e => {
+                    const next = { ...settings }; if (e.target.value) next.maxContextTokens = Number(e.target.value); else delete next.maxContextTokens; replacePlayer(color, next);
+                  }} /></label>
+                  <p className="hint">Seed отправляется только при явном выборе. Поддержка зависит от API. Одинаковый seed не гарантирует одинаковые ответы на разных GPU, версиях runtime и провайдерах. Метаданные описывают запуск и не меняют настройки сервера.</p>
+                </details>
               </> : <>
                 <label>Модель · {side}<select aria-label={`Модель · ${side}`} value={settings.strategy} onChange={e => player(color, { strategy: e.target.value as Strategy, invalidEvery: 1 })}>
                   {Object.entries(strategies).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
@@ -107,6 +134,12 @@ export function Settings({ config, disabled, onSave, initialStep }: {
               </details>
               <button type="button" disabled={checking[color] || (settings.provider === 'openai-compatible' && !settings.modelId.trim())} onClick={() => { void check(color); }}>Проверить модель · {side}</button>
               {checks[color] && <p className="hint" role="status" aria-label={`Проверка · ${side}`}>{checks[color]}</p>}
+              {diagnostics[color] && <div className="hint" aria-label={`Диагностика · ${side}`}>
+                <p>Время ответа: {diagnostics[color].metrics.responseTimeMs === null ? 'нет данных' : `${Math.round(diagnostics[color].metrics.responseTimeMs)} мс`}</p>
+                <p>Модель в ответе: {String(diagnostics[color].diagnostics?.reportedModel ?? 'нет данных')}</p>
+                <p>Контекст сервера: {String(diagnostics[color].diagnostics?.reportedMaxContextTokens ?? 'нет данных')}</p>
+                {diagnostics[color].diagnostics?.resourceError === 'OutOfMemory' && <p className="error-text">Runtime сообщил о нехватке памяти.</p>}
+              </div>}
             </div>;
           })}
         </div>

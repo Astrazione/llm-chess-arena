@@ -9,6 +9,7 @@ export interface MockSettings {
 export interface CompatibleSettings {
   provider: 'openai-compatible'; providerName: string; baseUrl: string; modelId: string;
   credentialProfile?: string; temperature?: number; maxOutputTokens?: number;
+  seed?: number; runtime?: string; runtimeVersion?: string; modelRevision?: string; quantization?: string; maxContextTokens?: number;
   tokenLimitParameter: 'max_tokens' | 'max_completion_tokens'; responseFormat: 'text' | 'json_object';
   timeoutMs: number; systemPrompt?: string;
 }
@@ -17,7 +18,7 @@ export interface RequestMetrics {
   responseTimeMs: number | null; inputTokens: number | null; outputTokens: number | null; totalTokens: number | null;
   generationTimeMs: number | null; modelLoadTimeMs: number | null;
 }
-export interface ProbeResult { available: boolean; diagnostic: string; error: Attempt['error']; metrics: RequestMetrics }
+export interface ProbeResult { available: boolean; diagnostic: string; error: Attempt['error']; metrics: RequestMetrics; diagnostics?: Attempt['diagnostics'] }
 export interface ProviderInfo { defaultSystemPrompt: string; profiles: { id: string; baseUrl: string }[] }
 export interface MatchConfig {
   players: Record<Color, PlayerSettings>; mode: 'A' | 'B'; maxRetries: number; maxPlies: number;
@@ -31,6 +32,7 @@ export interface Attempt {
   error: { code: 'InvalidFormat' | 'IllegalMove' | 'Timeout' | 'ProviderError' | 'EmptyResponse'; message: string } | null;
   diagnostics?: Record<string, string | number | boolean | null>;
   metrics?: RequestMetrics;
+  request?: { systemPrompt: string; userPrompt: string; position: { fen: string }; feedback?: { code: string; message: string } };
 }
 export interface MatchResult {
   kind: 'Chess' | 'ClaimedDraw' | 'TechnicalLoss' | 'Limit' | 'Stopped'; reason: string;
@@ -44,13 +46,33 @@ export interface MatchSnapshot {
   };
   attempts: Attempt[]; result: MatchResult | null; pgn: string; lastEventSequence: number;
   providerChecks?: { color: Color; checkedAt: string; result: ProbeResult }[];
+  statistics?: ExperimentStatistics; storageError?: string; archived?: boolean;
 }
 export interface GameEvent {
   schemaVersion: 1; matchId: string; gameId: string; sequence: number; at: string;
   type: 'GameCreated' | 'GameStarted' | 'MoveRequested' | 'MoveAccepted' | 'MoveRejected' | 'ProviderFailed' |
-    'AttemptCancelled' | 'GamePaused' | 'GameResumed' | 'GameCompleted' | 'GameStopped' | 'GameReset' | 'OperationSettled';
+    'AttemptCancelled' | 'GamePaused' | 'GameResumed' | 'GameCompleted' | 'GameStopped' | 'GameReset' | 'OperationSettled' | 'ProviderCheckRequested' | 'ProviderChecked';
   status: MatchStatus; ply: number; fen: string;
   data: { attempt?: Attempt; move?: MoveRecord; result?: MatchResult; color?: Color; message?: string; previousGameId?: string };
 }
 export interface StreamUpdate { schemaVersion: 1; event: GameEvent; snapshot: MatchSnapshot }
 export type Command = 'start' | 'pause' | 'resume' | 'next-move' | 'stop' | 'reset';
+export interface PlayerStatistics {
+  successfulMoves: number; illegalMoves: number; formatErrors: number; errors: number; retries: number;
+  requests: number; completedAttempts: number; legalMoveRatio: number | null; meanResponseMs: number | null; medianResponseMs: number | null;
+  inputTokens: number | null; outputTokens: number | null; inputTokenSamples: number; outputTokenSamples: number; responseSamples: number;
+}
+export interface ExperimentStatistics {
+  players: Record<Color, PlayerStatistics>; plies: number; durationMs: number | null;
+  moveRequests: number; preflightRequests: number; totalRequests: number;
+  resultCategory: 'Ongoing' | 'ChessWin' | 'Draw' | 'TechnicalLoss' | 'Stopped' | 'Limit';
+}
+export interface Experiment {
+  schema: 'llm-chess-arena/experiment'; schemaVersion: 1; id: string; matchId: string;
+  createdAt: string; updatedAt: string; recoveredAt?: string;
+  snapshot: MatchSnapshot; events: GameEvent[]; statistics: ExperimentStatistics;
+}
+export interface ExperimentSummary {
+  id: string; matchId: string; createdAt: string; updatedAt: string; status: MatchStatus;
+  players: Record<Color, string>; result: MatchResult | null; statistics: ExperimentStatistics;
+}

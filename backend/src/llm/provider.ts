@@ -15,10 +15,12 @@ export interface ModelConfiguration {
   modelId: string;
   // Runtime/model metadata is explicit for reproducible local experiments.
   runtime?: string;
+  runtimeVersion?: string;
   modelRevision?: string;
   quantization?: string;
   maxContextTokens?: number;
   temperature?: number;
+  seed?: number;
   maxOutputTokens?: number;
   timeoutMs: number;
   credentialProfile?: string;
@@ -36,7 +38,15 @@ export interface ModelAvailability {
   capabilities: ProviderCapabilities;
   diagnostic?: string;
   metrics?: RequestMetrics;
+  diagnostics?: ProviderDiagnostics;
+  rawText?: string;
 }
+
+export const connectionCheckRequest = (): CompletionRequest => ({
+  systemPrompt: 'Return a JSON object with one field move containing e2e4. No explanation.',
+  userPrompt: 'Connection check. Return {"move":"e2e4"}.',
+  position: { color: 'white', fen: '', ascii: '', history: [] },
+});
 
 export interface CompletionResponse {
   rawText: string;

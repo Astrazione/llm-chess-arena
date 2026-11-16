@@ -4,15 +4,18 @@ import type { Attempt, Color, DrawClaim, GameEvent, MatchConfig, MatchResult, Ma
 import { ChessEngine, IllegalMoveError } from '../domain/chess/engine.js';
 import { EventJournal } from '../events/journal.js';
 import { withDeadline } from '../llm/deadline.js';
-import { ProviderRequestError, requestMetrics, type LlmProvider, type ModelConfiguration } from '../llm/provider.js';
+import { connectionCheckRequest, ProviderRequestError, requestMetrics, type LlmProvider, type ModelConfiguration } from '../llm/provider.js';
 import { buildMoveRequest } from './prompts.js';
 import { MoveResponseError, parseMoveResponse } from './move-response.js';
+import { statistics } from '../experiments/statistics.js';
+import { StorageError } from '../experiments/store.js';
 
 export class MatchCommandError extends Error {
   constructor(readonly code: string, message: string, readonly statusCode = 409) { super(message); }
 }
 export interface PlayerBinding { provider: LlmProvider; config: ModelConfiguration }
 export type PlayersFactory = (config: MatchConfig) => Record<Color, PlayerBinding>;
+export type Checkpoint = (snapshot: MatchSnapshot, events: GameEvent[]) => Promise<void>;
 interface Operation {
   controller: AbortController;
   single: boolean;
@@ -41,8 +44,10 @@ export class GameOrchestrator {
   readonly #config: MatchConfig;
   #session: GameSession;
   #attemptSequence = 0;
+  #writes: Promise<void> = Promise.resolve();
+  #storageFailed = false;
 
-  constructor(config: MatchConfig, readonly playersFactory: PlayersFactory, initialFen?: string) {
+  constructor(config: MatchConfig, readonly playersFactory: PlayersFactory, initialFen?: string, readonly checkpoint?: Checkpoint) {
     this.#config = structuredClone(config);
     this.#session = this.#newSession(1, initialFen);
     this.#emit(this.#session, 'GameCreated');
@@ -57,17 +62,37 @@ export class GameOrchestrator {
 
   #emit(session: GameSession, type: GameEvent['type'], data: GameEvent['data'] = {}): void {
     this.events.publish({ matchId: this.id, gameId: session.gameId, type, status: session.status, ply: session.engine.ply, fen: session.engine.fen, data });
+    if (this.checkpoint && !this.#storageFailed) {
+      // Capture synchronously: Reset may replace the session before async observers run.
+      const snapshot = this.#snapshot(session);
+      const events = this.events.read(0, this.events.lastSequence).events.filter(event => event.gameId === session.gameId);
+      this.#writes = this.#writes.then(async () => { if (!this.#storageFailed) await this.checkpoint!(snapshot, events); }).catch(() => {
+        this.#storageFailed = true;
+        if (this.#session.status !== 'Completed' && this.#session.status !== 'Stopped') this.stop('InternalError');
+      });
+    }
   }
 
-  snapshot(): MatchSnapshot {
-    const session = this.#session;
-    return structuredClone({
+  snapshot(): MatchSnapshot { return this.#snapshot(this.#session); }
+
+  #snapshot(session: GameSession): MatchSnapshot {
+    const snapshot: MatchSnapshot = structuredClone({
       schemaVersion: 1, id: this.id, gameId: session.gameId, generation: session.generation,
       status: session.status, busy: session.operation !== null, config: this.#config,
       position: session.engine.snapshot(), attempts: session.attempts, result: session.result,
       providerChecks: session.providerChecks,
       pgn: session.engine.exportPgn(session.result?.score), lastEventSequence: this.events.lastSequence,
+      ...(this.#storageFailed ? { storageError: 'Не удалось сохранить эксперимент. Проверьте DATA_DIR и свободное место.' } : {}),
     });
+    snapshot.statistics = statistics(snapshot, this.events.read(0, this.events.lastSequence).events);
+    return snapshot;
+  }
+
+  async persisted(): Promise<void> {
+    // A transition can enqueue another checkpoint while a prior write is finishing.
+    let writes: Promise<void>;
+    do { writes = this.#writes; await writes; } while (writes !== this.#writes);
+    if (this.#storageFailed) throw new StorageError('StorageUnavailable', 503);
   }
 
   #requireStatus(...allowed: MatchStatus[]): GameSession {
@@ -77,10 +102,12 @@ export class GameOrchestrator {
   }
 
   #requireIdle(session: GameSession): void {
+    if (this.#storageFailed) throw new StorageError('StorageUnavailable', 503);
     if (session.operation) throw new MatchCommandError('OperationInProgress', 'A move or preflight is already in progress');
   }
 
   start(): MatchSnapshot {
+    if (this.#storageFailed) throw new StorageError('StorageUnavailable', 503);
     if (this.#session.status === 'Running') return this.snapshot();
     const session = this.#requireStatus('Created');
     session.status = 'Running';
@@ -163,6 +190,7 @@ export class GameOrchestrator {
   async close(): Promise<void> {
     if (this.#session.status !== 'Completed' && this.#session.status !== 'Stopped') this.stop('ServerShutdown');
     await this.idle();
+    await this.persisted();
   }
 
   #current(session: GameSession, operation: Operation): boolean {
@@ -208,6 +236,13 @@ export class GameOrchestrator {
     if (session.probed) return true;
     for (const color of ['white', 'black'] as const) {
       const player = session.players[color];
+      const request = player.config.provider === 'openai-compatible' ? connectionCheckRequest() : undefined;
+      const check: MatchSnapshot['providerChecks'][number] = { color, checkedAt: new Date().toISOString(),
+        ...(request ? { request } : {}), result: { available: false, diagnostic: 'Checking model', error: null, metrics: requestMetrics() } };
+      session.providerChecks.push(check);
+      this.#emit(session, 'ProviderCheckRequested', { color });
+      if (this.checkpoint) await this.persisted();
+      if (!this.#current(session, operation)) return false;
       try {
         const availability = await withDeadline(operation.controller.signal, player.config.timeoutMs, signal => player.provider.probe(player.config, signal));
         if (!this.#current(session, operation)) return false;
@@ -216,16 +251,18 @@ export class GameOrchestrator {
             (player.config.maxOutputTokens !== undefined && !availability.capabilities.maxOutputTokens)) {
           throw new MoveResponseError('ProviderError', 'Requested generation parameters are unsupported');
         }
-        session.providerChecks.push({ color, checkedAt: new Date().toISOString(), result: {
-          available: true, diagnostic: availability.diagnostic ?? 'Model is available', error: null, metrics: availability.metrics ?? requestMetrics(),
-        } });
+        check.result = {
+          available: true, diagnostic: availability.diagnostic ?? 'Model is available', error: null, metrics: availability.metrics ?? requestMetrics(), ...(availability.diagnostics ? { diagnostics: availability.diagnostics } : {}),
+        };
+        if (availability.rawText !== undefined) check.rawText = availability.rawText;
+        this.#emit(session, 'ProviderChecked', { color });
       } catch (error) {
         if (!this.#current(session, operation)) return false;
         const code = error instanceof MoveResponseError ? error.code : 'ProviderError';
         const message = error instanceof MoveResponseError ? error.message : 'Model preflight failed';
-        session.providerChecks.push({ color, checkedAt: new Date().toISOString(), result: {
-          available: false, diagnostic: message, error: { code, message }, metrics: error instanceof ProviderRequestError ? error.metrics : requestMetrics(),
-        } });
+        check.result = {
+          available: false, diagnostic: message, error: { code, message }, metrics: error instanceof ProviderRequestError ? error.metrics : requestMetrics(), ...(error instanceof ProviderRequestError ? { diagnostics: error.diagnostics } : {}),
+        };
         this.#emit(session, 'ProviderFailed', { color, message: `Model preflight failed (${code}): ${message}` });
         this.#technicalLoss(session, color, code);
         return false;
@@ -278,6 +315,8 @@ export class GameOrchestrator {
       operation.attemptStarted = performance.now();
       session.attempts.push(attempt);
       this.#emit(session, 'MoveRequested', { attempt });
+      if (this.checkpoint) await this.persisted();
+      if (!this.#current(session, operation)) return;
       try {
         const response = await withDeadline(operation.controller.signal, player.config.timeoutMs,
           signal => player.provider.complete(player.config, structuredClone(attempt.request), signal)).catch(error => {
@@ -296,6 +335,7 @@ export class GameOrchestrator {
         session.turn = null;
         this.#emit(session, 'MoveAccepted', { attempt, move });
         this.#checkCompletion(session);
+        if (this.checkpoint) await this.persisted();
         return;
       } catch (error) {
         if (!this.#current(session, operation)) return;
@@ -311,6 +351,7 @@ export class GameOrchestrator {
         operation.attempt = null;
         const event = failure.code === 'ProviderError' || failure.code === 'Timeout' ? 'ProviderFailed' : 'MoveRejected';
         this.#emit(session, event, { attempt });
+        if (this.checkpoint) await this.persisted();
         turn.feedback = failure;
         if (turn.attempts > this.#config.maxRetries) {
           this.#technicalLoss(session, color, failure.code);

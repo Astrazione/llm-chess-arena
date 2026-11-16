@@ -78,7 +78,8 @@ export class ChessEngine {
     return reason ? { kind: 'Chess', reason, score: '1/2-1/2', winner: null } : null;
   }
 
-  exportPgn(score: '1-0' | '0-1' | '1/2-1/2' | '*' = this.outcome()?.score ?? '*'): string {
+  exportPgn(score: '1-0' | '0-1' | '1/2-1/2' | '*' = this.outcome()?.score ?? '*', headers: Record<string, string> = {}): string {
+    for (const [key, value] of Object.entries(headers)) this.#chess.setHeader(key, value.replace(/[\\"\r\n]/g, ' '));
     this.#chess.setHeader('Result', score);
     return this.#chess.pgn();
   }

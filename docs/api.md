@@ -1,4 +1,4 @@
-# REST и SSE API матчей — этап 4A
+# REST, SSE и архив экспериментов — этап 5
 
 Базовый URL с хоста: `http://localhost:3000/api` либо `http://localhost:5173/api` через Vite. В Docker-сети: `http://backend:3000/api`. Все тела — JSON, все изменения состояния — только на backend. Поддерживаются Mock и произвольные OpenAI-compatible Chat Completions endpoints. SSE доступен через тот же Vite proxy.
 
@@ -25,7 +25,7 @@
 
 `:id` — UUID ресурса матча. Он сохраняется при Reset; `gameId` меняется и `generation` увеличивается. Новая партия имеет свежие Mock Providers, начальные seed/cursor, чистые попытки и доску. HTTP API не принимает произвольный FEN; нестандартные стартовые позиции используются только в доменных тестах.
 
-Start/Resume возвращают принятый снимок немедленно. NextMove дожидается одного успешного хода, завершения или Stop. Ошибки и retries относятся к одному полуходу; после него второй полуход не запускается. При Reset во время NextMove ожидающий запрос получает 409 SessionChanged.
+Start/Resume возвращают принятый снимок после записи накопленных переходов; ответа модели не ждут. NextMove дожидается одного успешного хода, завершения или Stop и сохранения результата. Ошибки и retries относятся к одному полуходу; после него второй полуход не запускается. При Reset во время NextMove ожидающий запрос получает 409 SessionChanged.
 
 Pause не отменяет текущий запрос. Если ответ легален, он применяется; если отклонён, новый retry не начинается до Resume/NextMove. Уже использованный бюджет попыток и описание ошибки сохраняются. При busy=true команды NextMove и Resume из Paused возвращают 409 OperationInProgress. Stop/Reset работают и во время preflight/ожидания ответа, применяют AbortSignal и инвалидируют старую операцию. Поздний ответ не меняет ни доску, ни события новой/остановленной игры.
 
@@ -90,7 +90,9 @@ MalformedResponse всегда возвращает некорректный JSO
 
 Общий config.systemPrompt и отдельные players[color].systemPrompt сохраняются в конфигурации. Отсутствующий промпт игрока использует общий; длина 1…16000. Оба типа игроков поддерживают промпт. Переменные color/fen/ascii/history в двойных фигурных скобках подставляются перед каждой попыткой; неизвестные переменные дают 400. Список легальных ходов добавляется только в userPrompt/position режима B, в том числе при retries. Ответы/инструкции соперника не передаются. Исправленная моделью попытка — Accepted с attemptNumber > 1.
 
-ProbeResult: `{available, diagnostic, error, metrics}`. Для совместимого API выполняется реальный completion с выбранной моделью и параметрами; ответ проверяется как Chat Completions envelope с непустым content. Успех не доказывает, что сервер применяет поля, которые он молча игнорирует. Ошибка модели/сети возвращается как available=false, error.code/message с HTTP 200; нарушение схемы/профиля — HTTP 400. Probe отменяется при disconnect/shutdown.
+ProbeResult: `{available, diagnostic, error, metrics, diagnostics?}`. Для совместимого API выполняется реальный completion с выбранной моделью и параметрами; ответ проверяется как Chat Completions envelope с непустым content. Успех не доказывает, что сервер применяет поля, которые он молча игнорирует. Ошибка модели/сети возвращается как available=false, error.code/message с HTTP 200; нарушение схемы/профиля — HTTP 400. Probe отменяется при disconnect/shutdown.
+
+На этапе 4B добавлены необязательные diagnostics: endpointState (responding/unreachable), reportedModel из completion, modelMetadata (reported/unavailable), listedModel и reportedMaxContextTokens из опционального GET `<Base URL>/models` (max_model_len/context_length). Metadata читается с коротким deadline и не обязательна для совместимости API. Список моделей не считается измерением резидентности в памяти. Структурированная HTTP-ошибка нехватки памяти даёт resourceError=OutOfMemory без передачи её исходного текста. Поле diagnostics сохраняется также в snapshot.providerChecks и SSE-снимках; attempt.diagnostics содержит модель из ответа. Неизвестные VRAM/context/load/generation не оцениваются. Адреса runtimes: [local-inference.md](local-inference.md).
 
 ## Снимок и результаты
 
@@ -152,4 +154,24 @@ ProbeResult: `{available, diagnostic, error, metrics}`. Для совмести�
 
 Нативный EventSource восстанавливает соединение. Last-Event-ID не запускает серверный replay: при каждом подключении клиент читает REST snapshot, догружает страницы events после последнего REST-курсора и повторно читает snapshot. Курсор продвигается только страницами REST, поэтому SSE, пришедший раньше страницы, не создаёт пробел в журнале. События дедуплицируются по sequence и фильтруются по matchId/gameId. После Reset старый журнал скрывается, поздние HTTP/SSE-снимки старой generation игнорируются. Постоянного polling нет.
 
-Журнал и реестр матчей пока **в памяти процесса**. GET events сохраняет попытки прошлых gameId через события до перезапуска, но отдельного архива старых snapshots нет. Перезапуск/hot reload backend удаляет матчи. Клиент показывает потерю матча; кнопка «Переподключить» создаёт новый при 404, не повторяя старую команду. Постоянный JSON Store, файловый экспорт и освобождение старых матчей — этап 4B. Существующий Docker volume готов для них; текущий API не имитирует запись на диск.
+JSON-архив сохраняет каждую игру отдельно от реестра исполняемых матчей. После перезапуска GET matches/:id возвращает последний gameId с `archived:true`; SSE отправляет этот снимок и heartbeat, REST events возвращает сохранённый журнал последней игры. Исполнение автоматически не возобновляется. Команды к отсутствующему в RAM матчу дают 404; используйте replay для нового ресурса. При неизвестном UUID клиент предлагает переподключение, без повторной отправки команды хода.
+
+## Архив и экспорт
+
+| Метод и путь | Ответ |
+| --- | --- |
+| GET `/experiments?offset=0&limit=50` | experiments, total, unreadableFiles; limit 1…100, сортировка по createdAt убыванию |
+| GET `/experiments/:gameId` | Полный Experiment |
+| GET `/experiments/:gameId/export.json` | Experiment с Content-Disposition attachment |
+| GET `/experiments/:gameId/export.pgn` | application/x-chess-pgn, attachment; только принятые ходы |
+| POST `/experiments/:gameId/replay` | 201 MatchSnapshot, новые ID и Created; тело отсутствует или `{}`, провайдеры не вызываются |
+
+Формат Experiment: `{schema:"llm-chess-arena/experiment",schemaVersion:1,id,matchId,createdAt,updatedAt,recoveredAt?,snapshot,events,statistics}`. id=gameId. events включают события только этой партии с исходными глобальными sequence. Reset сохраняет старый snapshot/attempts/result и создаёт новый файл. Все схемы, включая статистику и экспорт, определены в contracts/match.ts. Новые необязательные поля v1 добавляются совместимо; неизвестная версия файла отклоняется, миграции пока не требуются.
+
+`statistics.players[color]`: successfulMoves, illegalMoves, formatErrors (InvalidFormat и EmptyResponse), errors, retries, requests, completedAttempts, legalMoveRatio, meanResponseMs, medianResponseMs, inputTokens/outputTokens и количества известных samples. Доля — Accepted/(Accepted+Rejected), Pending/Cancelled не считаются завершёнными. Среднее/медиана — только известные metrics.responseTimeMs, без подмены elapsedMs. Токены суммируются по известным значениям (включая отклонённые ответы), null означает отсутствие всех данных; samples позволяют отличить частичную сумму. Проверки до матча и их токены хранятся отдельно в providerChecks. totalRequests=moveRequests+preflightRequests; Mock probe не является HTTP-запросом. Это число зарегистрированных обращений: при аварии между сохранением Pending и отправкой нельзя доказать факт доставки запроса провайдеру.
+
+Статистика партии содержит plies, durationMs (с паузами, null до старта и при неизвестном времени аварии), resultCategory=Ongoing/ChessWin/Draw/TechnicalLoss/Stopped/Limit. Причина и счёт находятся в snapshot.result. В PGN TechnicalLoss имеет решающий счёт и Termination="rules infraction"; Stop — `*`/abandoned, Limit — `*`/unterminated. EndReason/ResultKind/GameId/MatchId/Mode сохраняются дополнительными тегами. FEN/SetUp для нестандартной стартовой позиции выставляет Chess Engine.
+
+Совместимый игрок также принимает необязательные seed (0…4294967295), runtime/runtimeVersion/modelRevision/quantization/maxContextTokens. Только seed передаётся в Chat Completions body; остальные — заявленные метаданные воспроизводимости. `ProviderCheckRequested` фиксирует намерение preflight до вызова, `ProviderChecked` — успешное завершение. providerChecks содержит request/rawText, когда они доступны; ошибка API не публикует upstream body/headers. Ручная кнопка probe — диагностика вне эксперимента и в его журнал не включается.
+
+Ошибки архива: 404 ExperimentNotFound, 422 CorruptExperiment (включая неизвестную версию), 503 StorageUnavailable. При отказе записи модель больше не вызывается, в live snapshot появляется storageError, последний целый файл остаётся читаемым. До нового запуска устраните причину записи. После штатного shutdown результат ServerShutdown сохраняется до закрытия Fastify; после аварии recovery добавляет отметку recoveredAt и отменяет Pending без выдуманного времени ответа.

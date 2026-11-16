@@ -19,7 +19,7 @@ flowchart LR
     Store --> Volume[(experiments volume)]
 ```
 
-На этапе 1 созданы Vite, Fastify, health route, проверка готовности каталога данных и Docker-окружение. На этапе 2 добавлены Chess Engine, оркестратор, Mock Provider, REST, Prompt Builder/Parser и EventJournal с подписками. На этапе 3 реализованы веб-интерфейс и SSE. На этапе 4A подключён внешний Chat Completions adapter; постоянные Logger/Store — этап 4B.
+На этапе 1 созданы Vite, Fastify, health route, проверка готовности каталога данных и Docker-окружение. На этапе 2 добавлены Chess Engine, оркестратор, Mock Provider, REST, Prompt Builder/Parser и EventJournal с подписками. На этапе 3 реализованы веб-интерфейс и SSE, на этапе 4A — Chat Completions adapter, на 4B — необязательный GPU runtime. Этап 5 добавляет постоянный журнал/JSON Store, архив, статистику и экспорт.
 
 Контракты DTO и JSON-схемы находятся в `backend/src/contracts/match.ts`; домен импортирует только их TypeScript-типы, не HTTP-фреймворк. `routes/matches.ts` адаптирует REST к `MatchService`, который создаёт оркестраторы и связывает игроков с Mock либо Chat Completions adapter через factory. Внутри Mock нет собственной шахматной логики: список ходов внедряет композиция через Chess Engine. Подробности API и полей: [api.md](api.md).
 
@@ -38,7 +38,7 @@ flowchart LR
 | Event Publisher | SSE `snapshot/match` с versioned DTO, matchId/gameId, sequence и полным снимком; heartbeat и закрытие соединений. Реализован. | `backend/src/routes/matches.ts` |
 | Frontend | API client, представление состояния, доска, панели настроек/журнала/статистики. Навигация по истории локальна и не изменяет игру. | `frontend/src/` |
 
-В таблице сохраняются целевые границы; JSON Store ещё не реализован. Текущий REST/SSE-контракт зафиксирован в TypeBox/Static и документации API. Публичные типы frontend находятся в api/contracts.ts; канонические схемы остаются в backend/src/contracts/match.ts. Общего runtime-пакета и chess.js на frontend нет.
+Таблица описывает реализованные границы. Оркестратор принимает checkpoint-порт; MatchService связывает его с ExperimentStore. `experiments/record.ts` формирует запись и PGN, `statistics.ts` агрегирует фактически доступные показатели, `storage/json-experiment-store.ts` реализует файлы. Контракты архивов/статистики/REST/SSE зафиксированы в TypeBox/Static и документации API. Публичные типы frontend находятся в api/contracts.ts; канонические схемы остаются в backend/src/contracts/match.ts. Общего runtime-пакета и chess.js на frontend нет.
 
 ## Модели и локальный inference
 
@@ -50,9 +50,11 @@ ProviderCredentials загружает ключи из server env при ком�
 
 Native fetch выполняет один non-streaming POST /chat/completions. Тайм-аут/AbortSignal охватывают заголовки и чтение тела, предел ответа 1 MiB проверяется по Content-Length и накопленным bytes. 429 и сетевые ошибки используют обычный бюджет попыток без внутренних HTTP retries. Из ответа берутся только message.content, finish_reason и стандартный usage; скрытые reasoning-поля не сохраняются. Attempt.metrics и ProviderCheck.metrics имеют null для неизвестных токенов/времени генерации/загрузки. elapsedMs — полный интервал попытки, responseTimeMs — HTTP-ответ; они не выдаются за время генерации. Ошибка одного endpoint не завершает backend.
 
-Совместимые облачные и локальные API подключаются через общий HTTP adapter. Две модели могут использовать разные endpoints, один и тот же endpoint или играть против Mock. Конкретные runtimes и настоящие модели пока не проверены; специализированная инфраструктура vLLM CUDA отложена до этапа 5.
+Совместимые облачные и локальные API подключаются через общий HTTP adapter. Две модели могут использовать разные endpoints, один и тот же endpoint или играть против Mock. На этапе 4B добавлены шаблоны URL NVIDIA vLLM / внешний vLLM / Metal / Docker Model Runner / Ollama / cloud. Это только настройки универсального адаптера; домен и оркестратор не знают о GPU runtime.
 
-На этапе 5 добавится необязательный Compose profile `nvidia`: официальный образ vLLM с проверенной совместимостью CUDA/Blackwell sm_120, GPU reservation, cache volume, ограничениями контекста и памяти. На macOS backend обращается к inference на хосте через `host.docker.internal`; Metal не передаётся в Linux-контейнер. В основном Compose уже есть host-gateway для Linux.
+`compose.inference.yaml` включён в основной Compose, но сервис vllm активируется только профилем nvidia. Нет зависимости запуска/health приложения от inference. Официальный vLLM v0.32.0, одна GPU reservation, постоянный HF-кеш, параметры модели/revision/контекста/памяти; начальная Qwen2.5-7B-Instruct-AWQ 4-bit и контекст 4096. На macOS backend обращается к нативному Metal через host.docker.internal; DMR Desktop имеет специальный URL model-runner.docker.internal/engines/v1. Metal не передаётся в Linux-контейнер. Инструкции и источники: [local-inference.md](local-inference.md), фактические проверки: [verification-stage-4b.md](verification-stage-4b.md).
+
+ProbeResult.diagnostics передаётся через REST и snapshots/providerChecks. После completion необязательный GET /models с отдельным коротким deadline извлекает только выбранную модель и сообщённый сервером max_model_len/context_length. Отсутствие metadata не блокирует совместимый endpoint. Completion diagnostics сохраняет reportedModel. Структурированная HTTP-ошибка памяти классифицируется без публикации upstream body. Никаких оценок VRAM, подмены latency временем генерации или фонового мониторинга нет; доступность относится ко времени проверки. Startup OOM без HTTP-ответа диагностируется в логах runtime.
 
 ## Состояние и конкурентность (реализовано на этапе 2)
 
@@ -62,7 +64,7 @@ Native fetch выполняет один non-streaming POST /chat/completions. �
 
 Stop/Reset отменяют запрос. Reset сохраняет UUID ресурса, увеличивает generation и создаёт новый gameId/engine/providers. Каждый ответ проверяет идентичность текущей сессии/операции перед изменением доски и публикацией. Promise гонки timeout/cancellation завершается даже для адаптера, игнорирующего AbortSignal; запоздавшие ответы игнорируются. Попытка записывается до запроса и завершается как Accepted/Rejected/Cancelled; ошибочная попытка не меняет позицию. EventJournal выдаёт монотонные sequence и копии, журнал событий сохраняется между Reset в RAM.
 
-На SIGTERM Fastify preClose отменяет операции до ожидания активных HTTP-обработчиков, поэтому длительный NextMove не блокирует shutdown. Матч получает Stopped/ServerShutdown; сохранения на диск пока нет.
+На SIGTERM Fastify preClose отменяет операции до ожидания активных HTTP-обработчиков, поэтому длительный NextMove не блокирует shutdown. Матч получает Stopped/ServerShutdown; shutdown ждёт завершения очереди атомарных сохранений. Очередь привязана к ресурсу, но каждый checkpoint содержит копию конкретного gameId и его событий, снятую синхронно до возможного Reset. Наблюдатели SSE не отвечают за сохранение.
 
 ## Интерфейс и SSE (этап 3)
 
@@ -72,7 +74,13 @@ React получает backend snapshot через REST/SSE; react-chessboard 5.
 
 EventSource автоматически переподключается. После каждого подключения клиент читает REST snapshot и страницы журнала после последнего подтверждённого REST-курсора. Поток продолжает приниматься параллельно: журнал дедуплицируется по sequence, снимки принимаются по generation/lastEventSequence, события фильтруются по gameId. Reset очищает показанный журнал и выбор истории. NextMove не повторяется автоматически после сетевой ошибки; REST уточняет состояние. Постоянного polling нет. UUID матча хранится в sessionStorage для восстановления вкладки.
 
-Текущие матчи, события и попытки — в RAM и теряются при перезапуске backend. При 404 интерфейс предлагает переподключиться; новый матч создаётся только явным действием пользователя. Этап 4B добавит атомарный JSON Store (временный файл + rename в DATA_DIR), архив, экспорт и сохранение при shutdown. Существующий volume experiments сохраняется при пересоздании сервисов, но RAM-матчи туда ещё не пишутся.
+Матчи исполняются в RAM, каждый переход сохраняет отдельный `<gameId>.json` в DATA_DIR. Файл содержит schema/schemaVersion, snapshot, события текущей партии, статистику и метки времени. Запрос Pending записывается до провайдера; результат записывается до следующего запроса. Запись использует уникальный временный файл в том же каталоге, права 0600, fsync, rename и fsync каталога. Отказ записи останавливает матч, даёт 503 и storageError в live snapshot; архив последнего успешного checkpoint остаётся читаемым. Нельзя обещать сохранение ответа, который пришёл между последним checkpoint и аварией; вся накопленная до него история остаётся целой.
+
+При старте Store валидирует файлы, пропускает повреждённые/неизвестные версии с подсчётом в списке, не удаляет их. Незавершённые снимки становятся Stopped/ServerShutdown с recoveredAt; Pending становится Cancelled без выдуманного времени завершения и токенов. Автоматического восстановления исполнения нет: GET match/SSE/журнал читают последний gameId, UI открывает архивный режим. Новый запуск копирует конфигурацию в новые UUID и повторяет preflight. Архив по прежнему ID доступен независимо от живого оркестратора. До перезапуска реестр и события Reset сохраняются в RAM; автоматической очистки/TTL и индексирования большого архива пока нет.
+
+Store удаляет значения известных ключей и Bearer-токенов во всех строковых полях перед записью и при чтении; DTO запрещают поля секретов, Authorization headers не передаются в журнал. Completion adapter сохраняет только публичный message.content и разрешённую диагностику, без hidden reasoning и произвольного upstream body. Конфигурация сохраняет seed и заявленные runtime/version/revision/quantization/context; эти метаданные не выдаются за измеренные параметры сервера. Точный body completion восстанавливается из config и request; HTTP headers не экспортируются. Preflight хранится отдельно от попыток ходов.
+
+История UI использует тот же MatchWorkspace/react-chessboard и готовые backend FEN/SAN. Снимок архива остаётся фиксированным при продолжающемся live-матче. Сравнительная таблица получает серверную statistics; формулы в браузере не дублируются. PGN строится Chess Engine из подтверждённых UCI и стартового FEN, содержит Result/Termination/EndReason; тесты повторно импортируют его через chess.js. Полный JSON экспортирует запись v1, включая исходные инструкции, ошибки, feedback, доступные метрики и хронологию.
 
 На этапе 4A изучена официальная документация [OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create), [совместимости Ollama](https://docs.ollama.com/api/openai-compatibility) и [OpenRouter Chat Completions](https://openrouter.ai/docs/api/api-reference/chat/create-a-chat-completion). Она определяет messages/content/usage, различия max_tokens/max_completion_tokens и опциональность JSON mode. Реальные endpoints этих поставщиков в автоматических тестах не вызываются.
 

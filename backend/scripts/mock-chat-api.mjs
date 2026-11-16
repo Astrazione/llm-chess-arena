@@ -4,6 +4,10 @@ import { Chess } from 'chess.js';
 
 const server = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/health') { response.end('ok'); return; }
+  if (request.method === 'GET' && /^\/(white|black)\/v1\/models$/.test(request.url ?? '')) {
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ data: [{ id: 'legal', max_model_len: 4096 }] })); return;
+  }
   if (request.method !== 'POST' || !/^\/(white|black)\/v1\/chat\/completions$/.test(request.url ?? '')) {
     response.writeHead(404); response.end(); return;
   }
@@ -11,6 +15,9 @@ const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (body.model === 'oom') {
+      response.writeHead(500); response.end(JSON.stringify({ error: { message: 'CUDA out of memory: PRIVATE runtime data' } })); return;
+    }
     if (body.model === 'rate-limit' || body.model === 'reject-parameters') {
       response.writeHead(body.model === 'rate-limit' ? 429 : 400);
       response.end('{"error":{"message":"Test API rejection"}}'); return;
@@ -29,7 +36,7 @@ const server = createServer(async (request, response) => {
       if (body.model === 'correct-on-retry' && !position.previousError) content = '{"move":"a1a1"}';
     }
     response.setHeader('Content-Type', 'application/json');
-    response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 8, total_tokens: 108 } }));
+    response.end(JSON.stringify({ model: body.model, choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 100, completion_tokens: 8, total_tokens: 108 } }));
   } catch {
     response.writeHead(400); response.end();
   }

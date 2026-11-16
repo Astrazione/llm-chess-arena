@@ -28,7 +28,8 @@ p { line-height: 1.55; }
 .board-heading h2 { margin-top: 5px; font-size: 1.15rem; }
 .icon-button { padding: 6px 14px; font-size: 1.3rem; }
 .board-frame { width: 100%; aspect-ratio: 1; border: 5px solid #293b30; border-radius: 4px; overflow: hidden; margin: 10px 0; }
-.player { display: flex; align-items: center; gap: 12px; padding: 12px 13px; border: 1px solid #2d3932; border-radius: 8px; background: #18201b; }
+.player { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 13px; border: 1px solid #2d3932; border-radius: 8px; background: #18201b; }
+.player > .hint { flex: 1 0 100%; min-width: 0; overflow-wrap: anywhere; margin-top: 0; }
 .player.active { border-color: #819f70; background: #1d2920; }
 .piece-avatar { flex: 0 0 36px; width: 36px; height: 38px; display: grid; place-items: center; border-radius: 6px; font-size: 1.9rem; background: #2d3d30; }
 .piece-avatar.white { color: #ecebdc; }.piece-avatar.black { color: #101613; background: #93a58b; }
@@ -87,3 +88,15 @@ footer { display: flex; justify-content: space-between; gap: 15px; color: #74887
 @media (max-width: 760px) { .shell { max-width: 620px; padding: 20px 16px; }.workspace { grid-template-columns: minmax(0, 1fr); gap: 24px; }.app-header { align-items: flex-start; margin-bottom: 22px; gap: 12px; }.connection { max-width: 155px; font-size: .65rem; padding-top: 4px; }.app-header .eyebrow { font-size: .52rem; }.player-name strong { font-size: .85rem; }.info-column { gap: 16px; }.panel { padding: 18px; }.board-heading { margin-bottom: 13px; }.log-entry { grid-template-columns: 58px minmax(0, 1fr); } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 @media (max-width: 420px) { .player-settings { grid-template-columns: minmax(0, 1fr); gap: 12px; }.settings > summary span { float: none; display: block; margin-left: 15px; margin-top: 4px; } }
+ .page-nav { display: flex; flex-wrap: wrap; gap: .6rem; margin: 1rem 0; }
+ .page-nav [aria-pressed="true"] { border-color: var(--accent, #99d7b3); }
+ .exports { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; }
+ .exports h2 { width: 100%; margin-bottom: 0; }
+ .exports a { color: #b8dfc5; }
+ .table-scroll { overflow-x: auto; }
+ .analytics table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+ .analytics th, .analytics td { text-align: left; padding: .5rem .3rem; border-bottom: 1px solid #34443e; }
+ .analytics th { font-weight: 500; }
+ .experiment-list { display: grid; gap: .7rem; }
+ .experiment-row { display: grid; gap: .4rem; text-align: left; width: 100%; overflow-wrap: anywhere; }
+ .panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; max-height: 400px; overflow: auto; }
