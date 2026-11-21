@@ -17,6 +17,7 @@ try {
   await expect(page.getByTestId('connection')).toHaveText('SSE подключён');
   await expect(page.getByRole('heading', { name: 'Сохранённая партия' })).toBeVisible();
   await expect(page.locator('.board-frame')).toHaveAttribute('data-fen', record.snapshot.position.fen);
+  await page.getByRole('tab', { name: 'Журнал', exact: true }).click();
   await expect(page.getByRole('log')).toContainText('Матч остановлен');
   await expect(page.getByRole('button', { name: 'Start', exact: true })).toHaveCount(0);
   const before = await (await page.request.get(`${root}/api/matches/${record.matchId}/events?limit=500`)).json();

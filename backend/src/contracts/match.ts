@@ -200,3 +200,12 @@ export const ExperimentSummarySchema = Type.Object({
 export const ExperimentListSchema = Type.Object({
   experiments: Type.Array(ExperimentSummarySchema), unreadableFiles: Type.Integer(), total: Type.Integer(),
 }, objectOptions);
+export const HistoryCleanupRequestSchema = Type.Object({
+  gameIds: Type.Array(Type.String({ format: 'uuid' }), { uniqueItems: true }),
+}, objectOptions);
+export const HistoryCleanupPreviewSchema = Type.Object({
+  schemaVersion: Type.Literal(1), gameIds: Type.Array(Type.String({ format: 'uuid' })),
+}, objectOptions);
+export const HistoryCleanupResultSchema = Type.Object({
+  schemaVersion: Type.Literal(1), deleted: Type.Integer(), skipped: Type.Integer(), failed: Type.Integer(),
+}, objectOptions);

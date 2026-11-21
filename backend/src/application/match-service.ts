@@ -88,6 +88,10 @@ export class MatchService {
     return { events: remaining.slice(0, limit), lastSequence: record.snapshot.lastEventSequence, hasMore: remaining.length > limit };
   }
   findLive(id: string) { return this.#matches.get(id); }
+  protectedGameIds(): ReadonlySet<string> {
+    return new Set([...this.#matches.values()].map(match => match.snapshot())
+      .filter(snapshot => !snapshot.result || snapshot.busy).map(snapshot => snapshot.gameId));
+  }
   async flush() { await Promise.allSettled([...this.#matches.values()].map(match => match.persisted())); }
   info() { return { defaultSystemPrompt: DEFAULT_SYSTEM_PROMPT, profiles: this.credentials.list() }; }
   async probe(settings: PlayerSettings, signal: AbortSignal): Promise<ProbeResult> {

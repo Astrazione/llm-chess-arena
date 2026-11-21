@@ -10,4 +10,6 @@ export interface ExperimentStore {
   list(offset?: number, limit?: number): Promise<Static<typeof ExperimentListSchema>>;
   latest(matchId: string): Promise<Experiment>;
   recover(): Promise<void>;
+  cleanupCandidates(protectedIds: ReadonlySet<string>): Promise<string[]>;
+  removeCompleted(ids: readonly string[], protectedIds: ReadonlySet<string>): Promise<{ deleted: number; skipped: number; failed: number }>;
 }

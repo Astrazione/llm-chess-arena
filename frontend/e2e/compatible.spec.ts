@@ -1,3 +1,4 @@
+import { openSettings, showInfo } from './ui-helpers';
 import { expect, test, type Page } from '@playwright/test';
 
 const button = (page: Page, name: string) => page.getByRole('button', { name, exact: true });
@@ -6,9 +7,13 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByTestId('connection')).toHaveText('SSE подключён');
 });
 async function endpoint(page: Page, side: 'белые' | 'чёрные', model = 'legal') {
+  await openSettings(page, side);
   await page.getByLabel(`Провайдер · ${side}`, { exact: true }).selectOption('openai-compatible');
+  await openSettings(page, side);
   await page.getByLabel(`Base URL · ${side}`, { exact: true }).fill(`http://mock-api:8080/${side === 'белые' ? 'white' : 'black'}/v1`);
+  await openSettings(page, side);
   await page.getByLabel(`Ручной ввод Model ID · ${side}`, { exact: true }).check();
+  await openSettings(page, side);
   await page.getByLabel(`Модель · ${side}`, { exact: true }).fill(model);
 }
 async function apply(page: Page) {
@@ -23,21 +28,33 @@ test('two independent compatible endpoints play through Vite, REST and SSE with 
   page.on('pageerror', error => errors.push(error.message));
   await endpoint(page, 'белые', 'correct-on-retry');
   await endpoint(page, 'чёрные');
+  await openSettings(page, 'Белые');
   await page.getByLabel('Temperature · белые', { exact: true }).fill('0');
+  await openSettings(page, 'Белые');
   await page.getByLabel('Лимит токенов · белые', { exact: true }).fill('128');
+  await openSettings(page, 'Белые');
   await page.getByLabel('Параметр лимита · белые', { exact: true }).selectOption('max_completion_tokens');
+  await openSettings(page, 'Белые');
   await page.getByLabel('Формат API · белые', { exact: true }).selectOption('json_object');
+  await openSettings(page, 'Белые');
   await button(page, 'Проверить модель · белые').click();
   await expect(page.getByRole('status', { name: 'Проверка · белые', exact: true })).toContainText('Модель доступна');
+  await openSettings(page, 'Белые');
   await page.getByText('Промпт · белые', { exact: true }).click();
+  await openSettings(page, 'Белые');
   await page.getByLabel('Системный промпт · белые', { exact: true }).fill('White private instruction: {{color}} {{fen}} {{history}}');
+  await openSettings(page, 'Чёрные');
   await page.getByText('Промпт · чёрные', { exact: true }).click();
+  await openSettings(page, 'Чёрные');
   await button(page, 'Стандартный промпт · чёрные').click();
+  await openSettings(page, 'Общие');
   await page.getByLabel('Максимум полуходов', { exact: true }).fill('4');
+  await openSettings(page, 'Общие');
   await page.getByLabel('Режим игры', { exact: true }).selectOption('step');
   await apply(page);
   await button(page, 'Start').click();
   await expect(page.getByTestId('ply-count')).toHaveText('1');
+  await showInfo(page, 'Журнал');
   await expect(page.getByRole('log')).toContainText('исправлено моделью после повтора');
   for (let ply = 2; ply <= 4; ply++) {
     await expect(button(page, 'Next Move')).toBeEnabled();
@@ -61,8 +78,10 @@ test('two independent compatible endpoints play through Vite, REST and SSE with 
 
 test('connection errors are shown and Mock can play against a compatible endpoint', async ({ page }) => {
   await endpoint(page, 'белые', 'rate-limit');
+  await openSettings(page, 'Белые');
   await button(page, 'Проверить модель · белые').click();
   await expect(page.getByRole('status', { name: 'Проверка · белые', exact: true })).toContainText('HTTP 429');
+  await openSettings(page, 'Белые');
   await page.getByLabel('Модель · белые', { exact: true }).fill('legal');
   await apply(page);
   await button(page, 'Next Move').click();
@@ -85,14 +104,18 @@ test('runtime templates keep model IDs editable and show reported context and OO
     await expect(page.getByLabel('Модель · белые', { exact: true })).toHaveValue('legal');
   }
   await baseUrl.fill('http://mock-api:8080/white/v1');
+  await openSettings(page, 'Белые');
   await button(page, 'Проверить модель · белые').click();
   const diagnostics = page.getByLabel('Диагностика · белые', { exact: true });
   await expect(diagnostics).toContainText('Контекст сервера: 4096');
   await expect(diagnostics).toContainText('Модель в ответе: legal');
+  await openSettings(page, 'Белые');
   await page.getByLabel('Модель · белые', { exact: true }).fill('oom');
+  await openSettings(page, 'Белые');
   await button(page, 'Проверить модель · белые').click();
   await expect(diagnostics).toContainText('Runtime сообщил о нехватке памяти');
   await expect(page.locator('body')).not.toContainText('PRIVATE runtime data');
+  await openSettings(page, 'Белые');
   await page.getByLabel('Модель · белые', { exact: true }).fill('legal');
   await apply(page);
   await button(page, 'Next Move').click();
@@ -112,5 +135,6 @@ test('Reset cancels a compatible HTTP request and discards its late reply', asyn
   await expect(button(page, 'Start')).toBeEnabled();
   await page.waitForTimeout(1700);
   await expect(page.getByTestId('ply-count')).toHaveText('0');
+  await showInfo(page, 'Журнал');
   await expect(page.getByRole('log')).not.toContainText('Ход выполнен');
 });

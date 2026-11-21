@@ -31,6 +31,59 @@ describe('persistent experiments and exports', () => {
     return response.json<Experiment>();
   }
 
+  it('clears confirmed terminal games, preserves active games, unrelated and corrupt files, and survives restart', async () => {
+    const stopped = await create(); await command(stopped.id, 'stop');
+    const completed = await create({ maxPlies: 1 }); await command(completed.id, 'next-move');
+    const reset = await create(); const fresh = (await command(reset.id, 'reset')).json<MatchSnapshot>();
+    const paused = await create(); await command(paused.id, 'next-move');
+    const running = await create({ moveDelayMs: 60000 }); await command(running.id, 'start');
+    const badId = '00000000-0000-4000-8000-000000000001';
+    await writeFile(join(directory, `${badId}.json`), '{broken');
+    await writeFile(join(directory, 'settings.json'), '{"preserve":true}');
+    const preview = (await app.inject('/api/experiments/cleanup')).json();
+    expect(preview.schemaVersion).toBe(1);
+    expect(preview.gameIds.sort()).toEqual([stopped.gameId, completed.gameId, reset.gameId].sort());
+    const response = await app.inject({ method: 'DELETE', url: '/api/experiments', payload: { gameIds: preview.gameIds } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ schemaVersion: 1, deleted: 3, skipped: 0, failed: 0 });
+    for (const id of preview.gameIds) expect((await app.inject(`/api/experiments/${id}`)).statusCode).toBe(404);
+    for (const id of [fresh.gameId, paused.gameId, running.gameId]) await record(id);
+    expect(await readFile(join(directory, `${badId}.json`), 'utf8')).toBe('{broken');
+    expect(await readFile(join(directory, 'settings.json'), 'utf8')).toContain('preserve');
+    await app.close(); app = restart();
+    for (const id of preview.gameIds) expect((await app.inject(`/api/experiments/${id}`)).statusCode).toBe(404);
+  });
+
+  it('requires an explicit valid ID list and rechecks eligibility even for forged requests', async () => {
+    const active = await create(); await command(active.id, 'next-move');
+    for (const payload of [{}, { gameIds: ['../../settings'] }, { gameIds: [active.gameId], all: true }, { gameIds: [active.gameId, active.gameId] }]) {
+      expect((await app.inject({ method: 'DELETE', url: '/api/experiments', payload })).statusCode).toBe(400);
+    }
+    const response = await app.inject({ method: 'DELETE', url: '/api/experiments', payload: { gameIds: [active.gameId] } });
+    expect(response.json()).toMatchObject({ deleted: 0, skipped: 1, failed: 0 });
+    expect((await record(active.gameId)).snapshot.status).toBe('Paused');
+    expect((await app.inject({ method: 'DELETE', url: '/api/experiments', payload: { gameIds: [] } })).json()).toMatchObject({ deleted: 0 });
+  });
+
+  it('does not expand a confirmation when another game finishes, and repeated cleanup is idempotent', async () => {
+    const old = await create(); await command(old.id, 'stop');
+    const preview = (await app.inject('/api/experiments/cleanup')).json();
+    const later = await create(); await command(later.id, 'stop');
+    const clear = () => app.inject({ method: 'DELETE', url: '/api/experiments', payload: { gameIds: preview.gameIds } });
+    expect((await clear()).json()).toMatchObject({ deleted: 1, skipped: 0 });
+    expect((await clear()).json()).toMatchObject({ deleted: 0, skipped: 1 });
+    await record(later.gameId);
+  });
+
+  it('reports real filesystem deletion failures without losing files', async () => {
+    const match = await create(); await command(match.id, 'stop');
+    await chmod(directory, 0o500);
+    const response = await app.inject({ method: 'DELETE', url: '/api/experiments', payload: { gameIds: [match.gameId] } });
+    expect(response.json()).toMatchObject({ deleted: 0, skipped: 0, failed: 1 });
+    await record(match.gameId);
+    await chmod(directory, 0o700);
+  });
+
   it('persists a complete Mock game, exports standard PGN and reimports every position', async () => {
     const match = await create({ players: {
       white: { strategy: 'ScriptedMoves', moves: ['f2f3', 'g2g4'] }, black: { strategy: 'ScriptedMoves', moves: ['e7e5', 'd8h4'] },

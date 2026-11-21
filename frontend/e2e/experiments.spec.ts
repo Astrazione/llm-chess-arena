@@ -1,12 +1,18 @@
+import { openSettings, showInfo } from './ui-helpers';
 import { expect, test } from '@playwright/test';
 
 test('saved checkmate: board history, player statistics, downloads and a fresh experiment', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('connection')).toHaveText('SSE подключён');
+  await openSettings(page, 'Белые');
   await page.getByLabel('Модель · белые', { exact: true }).selectOption('ScriptedMoves');
+  await openSettings(page, 'Чёрные');
   await page.getByLabel('Модель · чёрные', { exact: true }).selectOption('ScriptedMoves');
+  await openSettings(page, 'Белые');
   await page.getByLabel('Ходы UCI · белые', { exact: true }).fill('f2f3 g2g4');
+  await openSettings(page, 'Чёрные');
   await page.getByLabel('Ходы UCI · чёрные', { exact: true }).fill('e7e5 d8h4');
+  await openSettings(page, 'Общие');
   await page.getByLabel('Между ходами, мс', { exact: true }).fill('0');
   await page.getByRole('button', { name: 'Применить настройки', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeEnabled();
@@ -17,11 +23,15 @@ test('saved checkmate: board history, player statistics, downloads and a fresh e
   await page.getByRole('button', { name: 'История экспериментов', exact: true }).click();
   await page.getByRole('button').filter({ hasText: original.gameId.slice(0, 8) }).click();
   await expect(page.getByRole('heading', { name: 'Сохранённая партия' })).toBeVisible();
+  await showInfo(page, 'Обзор');
   await expect(page.getByRole('region', { name: 'Сравнение игроков' })).toContainText('Шахматная победа');
+  await showInfo(page, 'Ходы');
   await page.getByRole('button', { name: 'Полуход 2: e5', exact: true }).click();
-  await expect(page.locator('.board-frame')).toHaveAttribute('data-fen', original.position.positions[2]);
+  await expect(page.locator('.board-frame:visible')).toHaveAttribute('data-fen', original.position.positions[2]);
+  await showInfo(page, 'Журнал');
   await expect(page.getByRole('log')).toContainText('Ход выполнен');
   const downloadEvent = page.waitForEvent('download');
+  await page.locator('.export-menu:visible > summary').click();
   await page.getByRole('link', { name: 'Скачать PGN' }).click();
   const download = await downloadEvent;
   expect(download.suggestedFilename()).toBe(`${original.gameId}.pgn`);
@@ -52,8 +62,10 @@ test('archive preserves rejected attempts and Reset games independently', async 
   await page.request.post(`/api/matches/${created.id}/reset`);
   await page.getByRole('button', { name: 'История экспериментов', exact: true }).click();
   await page.getByRole('button').filter({ hasText: created.gameId.slice(0, 8) }).click();
-  await expect(page.getByTestId('ply-count')).toHaveText('1');
+  await expect(page.getByTestId('ply-count').filter({ visible: true })).toHaveText('1');
+  await showInfo(page, 'Журнал');
   await expect(page.getByRole('log')).toContainText('IllegalMove');
+  await showInfo(page, 'Обзор');
   await expect(page.getByRole('region', { name: 'Сравнение игроков' })).toContainText('50.0%');
   const snapshot = await (await page.request.get(`/api/experiments/${created.gameId}`)).json();
   expect(snapshot.snapshot.result.reason).toBe('Reset');

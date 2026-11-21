@@ -83,6 +83,42 @@ export class JsonExperimentStore implements ExperimentStore {
     if (!candidates[0]) throw new StorageError('ExperimentNotFound', 404);
     return candidates[0];
   }
+  #removable(record: Experiment, protectedIds: ReadonlySet<string>): boolean {
+    return !protectedIds.has(record.id) && !record.snapshot.busy && record.snapshot.result !== null &&
+      (record.snapshot.status === 'Completed' || record.snapshot.status === 'Stopped');
+  }
+  async cleanupCandidates(protectedIds: ReadonlySet<string>): Promise<string[]> {
+    const ids: string[] = [];
+    for (const id of await this.#ids()) {
+      try { if (this.#removable(await this.get(id), protectedIds)) ids.push(id); }
+      catch (error) {
+        if (!(error instanceof StorageError && (error.code === 'CorruptExperiment' || error.code === 'ExperimentNotFound'))) throw error;
+      }
+    }
+    return ids;
+  }
+  async removeCompleted(ids: readonly string[], protectedIds: ReadonlySet<string>) {
+    const result = { deleted: 0, skipped: 0, failed: 0 };
+    // Delete only the explicitly confirmed IDs; new terminal games await another confirmation.
+    for (const id of new Set(ids)) {
+      try {
+        if (!this.#removable(await this.get(id), protectedIds)) { result.skipped++; continue; }
+        await unlink(this.#path(id));
+        result.deleted++;
+      } catch (error) {
+        if ((error instanceof StorageError && (error.code === 'CorruptExperiment' || error.code === 'ExperimentNotFound')) ||
+            (error as NodeJS.ErrnoException).code === 'ENOENT') result.skipped++;
+        else result.failed++;
+      }
+    }
+    if (result.deleted) {
+      try {
+        const directory = await open(this.directory, 'r');
+        try { await directory.sync(); } finally { await directory.close(); }
+      } catch { throw new StorageError('StorageUnavailable', 503); }
+    }
+    return result;
+  }
   async recover(): Promise<void> {
     for (const id of await this.#ids()) {
       let record: Experiment;

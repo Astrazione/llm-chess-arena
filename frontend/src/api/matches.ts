@@ -17,6 +17,10 @@ export const createMatch = (config: Partial<MatchConfig>, signal?: AbortSignal) 
 export const getMatch = (id: string, signal?: AbortSignal) => request<MatchSnapshot>(`/${id}`, signal ? { signal } : {});
 export const listExperiments = (offset: number, signal: AbortSignal) => request<{ experiments: ExperimentSummary[]; total: number; unreadableFiles: number }>(`?offset=${offset}&limit=25`, { signal }, '/api/experiments');
 export const getExperiment = (id: string, signal: AbortSignal) => request<Experiment>(`/${id}`, { signal }, '/api/experiments');
+export const previewHistoryCleanup = (signal: AbortSignal) => request<{ schemaVersion: 1; gameIds: string[] }>('/cleanup', { signal }, '/api/experiments');
+export const clearHistory = (gameIds: string[], signal: AbortSignal) => request<{ schemaVersion: 1; deleted: number; skipped: number; failed: number }>('', {
+  method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameIds }), signal,
+}, '/api/experiments');
 export const commandMatch = (id: string, command: Command, timeoutMs = 65000) => request<MatchSnapshot>(`/${id}/${command}`, { method: 'POST', signal: AbortSignal.timeout(timeoutMs) });
 export const getProviderInfo = (signal: AbortSignal) => request<ProviderInfo>('', { signal }, '/api/providers');
 export const discoverModels = (connection: Pick<CompatibleSettings, 'baseUrl' | 'credentialProfile'> & { discoveryApi: DiscoveryApi }, signal: AbortSignal) => request<ModelList>('/models', {
